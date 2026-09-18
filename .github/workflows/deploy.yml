@@ -89,7 +89,7 @@ jobs:
       - name: Checkout xsel-deploy-mutualise (scripts serveur, toujours main)
         uses: actions/checkout@v4
         with:
-          repository: eymryc/xsel-deploy-mutualise
+          repository: ouangni-wangny/xsel-deploy-mutualise
           ref: main
           path: deploy-kit
 

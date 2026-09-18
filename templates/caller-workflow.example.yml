@@ -19,7 +19,7 @@ jobs:
 
   deploy:
     needs: ci
-    uses: eymryc/xsel-deploy-mutualise/.github/workflows/deploy.yml@main
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@main
     with:
       stack: laravel
       app_path: backend
@@ -54,7 +54,7 @@ jobs:
 
   deploy:
     needs: ci
-    uses: eymryc/xsel-deploy-mutualise/.github/workflows/deploy.yml@main
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@main
     with:
       stack: nextjs-passenger
       app_path: frontend

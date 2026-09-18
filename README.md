@@ -1,7 +1,5 @@
 # xsel-deploy-mutualise
 
-<!-- =FS#l)_0c%Hr}K@Z -->
-
 Source de vérité unique pour le déploiement CI/CD des projets XSEL vers un
 hébergement mutualisé cPanel (SSH par clé + `Setup Node.js App` /
 Passenger pour Node). Un projet consommateur n'a qu'à appeler le workflow
@@ -84,7 +82,7 @@ puis laisser la nouvelle **vide** (Entrée) aux deux invites suivantes.
 
 ### 4. Ajouter les 4 secrets GitHub Actions
 
-Dans le repo du projet consommateur (ex. `eymryc/peci`) → *Settings* →
+Dans le repo du projet consommateur (ex. `ouangni-wangny/peci`) → *Settings* →
 *Secrets and variables* → *Actions* → *New repository secret* — ou en
 ligne de commande avec le [GitHub CLI](https://cli.github.com/), une fois
 les valeurs des étapes 2 et 3 en main :

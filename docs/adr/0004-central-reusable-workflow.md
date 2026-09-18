@@ -48,7 +48,7 @@ le corriger séparément dans chaque projet.
 - **Visibilité du repo — contrainte technique découverte en implémentant :**
   GitHub n'autorise l'appel `uses: owner/repo/.github/workflows/x.yml@ref`
   vers un *autre* repo que si ce repo est public, ou privé au sein d'une
-  organisation avec accès explicitement partagé. Le compte `eymryc` étant un
+  organisation avec accès explicitement partagé. Le compte `ouangni-wangny` étant un
   compte personnel (pas une org), `xsel-deploy-mutualise` doit rester
   **public** pour que le mécanisme fonctionne pour tous les projets
   consommateurs. Comme le repo ne contient aucun secret ni information
