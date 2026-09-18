@@ -1,6 +1,41 @@
-# Exemple : .github/workflows/deploy-backend.yml dans un projet consommateur
-# (copier-adapter — ceci est la SEULE chose qu'un projet doit porter en plus
-# de ses secrets GitHub et de sa propre CI de tests, voir ADR-0004 et ADR-0005).
+# Trois exemples de .github/workflows/deploy.yml dans un projet consommateur
+# (copier-adapter — c'est la SEULE chose qu'un projet doit porter en plus de
+# ses secrets GitHub et de sa propre CI de tests, voir ADR-0004 et ADR-0005).
+# Référence complète des inputs/secrets dans le README de ce repo.
+
+# =============================================================================
+# Cas 1 — Repo dédié à une seule app (multi-repo : le plus simple)
+# app_path est omis (défaut ".") : le repo entier EST l'app.
+# =============================================================================
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: ci
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@v1.0.1
+    with:
+      stack: laravel
+      deploy_path: /home/xselcpaneluser/api.exemple.com
+      health_check_url: https://api.exemple.com/up
+    secrets:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_PORT: ${{ secrets.SSH_PORT }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+
+---
+# =============================================================================
+# Cas 2 — Monorepo, app backend (ex. PECI : .github/workflows/deploy-backend.yml)
+# app_path pointe vers le sous-dossier ; paths: limite le déclenchement.
+# =============================================================================
 
 name: Deploy backend
 
@@ -13,13 +48,11 @@ on:
 
 jobs:
   ci:
-    # Réutilise ta CI existante (tests/lint) — le déploiement ne démarre
-    # que si elle passe. Adapter au workflow de tests réel du projet.
     uses: ./.github/workflows/ci-backend.yml
 
   deploy:
     needs: ci
-    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@main
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@v1.0.1
     with:
       stack: laravel
       app_path: backend
@@ -36,7 +69,12 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
 
 ---
-# Exemple : .github/workflows/deploy-frontend.yml (même projet, deuxième app)
+# =============================================================================
+# Cas 3 — Monorepo, app frontend (même projet que le cas 2, deuxième app)
+# protect_paths évite qu'un sous-domaine imbriqué (backend.peci.org vivant
+# dans peci.org/backend, chemin standard cPanel) soit effacé par le
+# déploiement de ce frontend — voir README, section "Organiser un projet".
+# =============================================================================
 
 name: Deploy frontend
 
@@ -53,12 +91,14 @@ jobs:
 
   deploy:
     needs: ci
-    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@main
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@v1.0.1
     with:
       stack: nextjs-passenger
       app_path: frontend
       deploy_path: /home/xselcpaneluser/peci.org
       health_check_url: https://peci.org
+      protect_paths: |
+        backend
       # Toute variable NEXT_PUBLIC_* lue côté client doit être ici, sinon
       # elle vaudra undefined dans le bundle buildé (jamais relue au
       # runtime via cPanel) :

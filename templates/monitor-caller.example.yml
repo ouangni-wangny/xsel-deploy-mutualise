@@ -12,7 +12,7 @@ on:
 
 jobs:
   check:
-    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/monitor.yml@main
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/monitor.yml@v1.0.1
     with:
       urls: |
         https://api.peci.org/up
