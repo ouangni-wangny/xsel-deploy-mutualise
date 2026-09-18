@@ -3,13 +3,15 @@
 Source de vérité unique pour le déploiement CI/CD des projets XSEL vers un
 hébergement mutualisé cPanel (SSH par clé + `Setup Node.js App` /
 Passenger pour Node). Un projet consommateur n'a qu'à appeler le workflow
-réutilisable de ce repo — la logique de déploiement (releases horodatées,
-bascule atomique, rollback, redémarrage) vit ici et nulle part ailleurs.
+réutilisable de ce repo — la logique de déploiement (build, transfert,
+install/migrations, redémarrage) vit ici et nulle part ailleurs.
+Déploiement direct : chaque push écrase le code en place (pas de
+releases/rollback automatisé — voir ADR-0002).
 
 Voir les décisions d'architecture dans [`docs/adr/`](docs/adr/) :
 
 - [ADR-0001](docs/adr/0001-ssh-rsync-transport.md) — transport SSH + rsync/scp
-- [ADR-0002](docs/adr/0002-releases-symlink-zero-downtime.md) — releases/ + symlink `current`
+- [ADR-0002](docs/adr/0002-releases-symlink-zero-downtime.md) — déploiement direct (pas de releases/symlink)
 - [ADR-0003](docs/adr/0003-nextjs-passenger.md) — Next.js via cPanel Passenger
 - [ADR-0004](docs/adr/0004-central-reusable-workflow.md) — repo central, workflow réutilisable
 - [ADR-0005](docs/adr/0005-ci-cd-separation.md) — séparation CI / CD
@@ -98,7 +100,7 @@ La dernière commande lit le fichier directement (`<`) plutôt que de coller
 le contenu de la clé en argument — évite qu'elle traîne dans l'historique
 du shell ou d'une conversation.
 
-### 5. Créer la structure de base sur le serveur (une fois par app)
+### 5. Créer le dossier de base sur le serveur (une fois par app)
 
 Copier [`scripts/bootstrap-app.sh`](scripts/bootstrap-app.sh) sur le
 serveur (`scp` ou coller son contenu dans un fichier via `nano`), puis :
@@ -109,15 +111,15 @@ DEPLOY_PATH=/home/<user>/<app> STACK=laravel bash bootstrap-app.sh
 DEPLOY_PATH=/home/<user>/<app> STACK=nextjs-passenger bash bootstrap-app.sh
 
 # Laravel uniquement : remplir le .env de prod (créé vide par le script)
-nano /home/<user>/<app>/shared/.env
+nano /home/<user>/<app>/.env
 ```
 
 ### 6. Configurer cPanel pour servir l'app
 
 - **Laravel** : cPanel → *Domains* → document root du (sous-)domaine sur
-  `<deploy_path>/current/public`.
+  `<deploy_path>/public`.
 - **Next.js** : cPanel → *Setup Node.js App* → *Create Application*,
-  fichier de démarrage `current/server.js` — détail dans
+  fichier de démarrage `server.js` — détail dans
   [`templates/passenger-nextjs-notes.md`](templates/passenger-nextjs-notes.md).
 
 ### 7. Ajouter le workflow appelant
@@ -128,16 +130,9 @@ dans `.github/workflows/` du projet, adapter `stack` / `app_path` /
 
 ### 8. Premier déploiement
 
-Push sur `main` → déploiement automatique.
-
-## Rollback manuel
-
-```bash
-ssh <user>@<host> -p <port>
-DEPLOY_PATH=/home/<user>/<app> bash /home/<user>/<app>/.deploy-scripts/rollback.sh
-# ou vers une release précise :
-DEPLOY_PATH=/home/<user>/<app> bash /home/<user>/<app>/.deploy-scripts/rollback.sh 20260918113000
-```
+Push sur `main` → déploiement automatique. En cas de problème après coup,
+pas de rollback automatisé (voir ADR-0002) : revert le commit fautif sur
+GitHub et repush, ou corrige directement sur le serveur.
 
 ## Statut
 

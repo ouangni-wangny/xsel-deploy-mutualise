@@ -3,8 +3,9 @@
 # xsel-deploy-mutualise — deploy-nextjs-passenger.sh
 #
 # Exécuté SUR LE SERVEUR (via ssh), une fois que le workflow a déjà rsync
-# le build Next.js standalone dans releases/<TIMESTAMP>/ :
-#   releases/<TIMESTAMP>/
+# le build Next.js standalone directement dans DEPLOY_PATH (voir ADR-0002 :
+# déploiement direct, sans releases/) :
+#   DEPLOY_PATH/
 #   ├── server.js          (.next/standalone/server.js)
 #   ├── node_modules/       (minimal, tracé par Next — pas d'install serveur)
 #   ├── .next/static/
@@ -14,9 +15,7 @@
 # fois pour toutes dans l'interface cPanel "Setup Node.js App", pas ici.
 #
 # Variables d'environnement requises :
-#   DEPLOY_PATH        racine de l'app (contient releases/, shared/, current)
-#   TIMESTAMP            identifiant de la release à activer
-#   KEEP_RELEASES          (défaut: 5)
+#   DEPLOY_PATH        racine de l'app (code déployé directement dedans)
 #   HEALTH_CHECK_URL         (optionnel)
 # =============================================================================
 set -euo pipefail
@@ -27,29 +26,18 @@ source "${SCRIPT_DIR}/lib/common.sh"
 
 HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-}"
 
-[ -d "$RELEASE_DIR" ] || die "Release introuvable : $RELEASE_DIR (le rsync a-t-il échoué ?)"
-[ -f "${RELEASE_DIR}/server.js" ] || die "server.js absent de la release — vérifiez next.config (output: 'standalone')."
-
-require_dirs
-
-swap_current "$TIMESTAMP"
+[ -f "${DEPLOY_PATH}/server.js" ] || die "server.js absent — vérifiez next.config (output: 'standalone')."
 
 log "Redémarrage Passenger (touch tmp/restart.txt)"
-mkdir -p "${DEPLOY_PATH}/current/tmp"
-touch "${DEPLOY_PATH}/current/tmp/restart.txt"
+mkdir -p "${DEPLOY_PATH}/tmp"
+touch "${DEPLOY_PATH}/tmp/restart.txt"
 
 # Passenger ne relance le process qu'au prochain hit HTTP entrant ; le
 # healthcheck ci-dessous (contre le domaine public) sert aussi de premier hit.
 sleep 2
 
 if [ -n "$HEALTH_CHECK_URL" ]; then
-  if ! health_check "$HEALTH_CHECK_URL"; then
-    rollback_from "$TIMESTAMP"
-    mkdir -p "${DEPLOY_PATH}/current/tmp"
-    touch "${DEPLOY_PATH}/current/tmp/restart.txt"
-    die "Déploiement annulé (healthcheck KO) — rollback effectué vers la release précédente."
-  fi
+  health_check "$HEALTH_CHECK_URL" || die "Déploiement terminé mais healthcheck KO — le code est en place, vérifiez manuellement (pas de rollback automatique, voir ADR-0002)."
 fi
 
-cleanup_releases
-ok "Déploiement Next.js terminé : releases/${TIMESTAMP}"
+ok "Déploiement Next.js terminé : ${DEPLOY_PATH}"

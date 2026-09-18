@@ -2,7 +2,8 @@ name: Deploy (mutualisé)
 
 # Workflow réutilisable — voir ADR-0004. Ne pas dupliquer dans les projets
 # consommateurs : ils l'appellent via `uses:` (voir
-# templates/caller-workflow.example.yml).
+# templates/caller-workflow.example.yml). Déploiement direct, sans
+# releases/symlink — voir ADR-0002.
 
 on:
   workflow_call:
@@ -17,7 +18,7 @@ on:
         type: string
         default: "."
       deploy_path:
-        description: "Chemin absolu sur le serveur (contient releases/, shared/, current)"
+        description: "Chemin absolu sur le serveur où le code est déployé directement"
         required: true
         type: string
       php_version:
@@ -28,12 +29,8 @@ on:
         required: false
         type: string
         default: "20"
-      keep_releases:
-        required: false
-        type: number
-        default: 5
       health_check_url:
-        description: "URL publique à vérifier après bascule (ex. https://api.peci.org/up) — optionnel mais recommandé"
+        description: "URL publique à vérifier après déploiement (ex. https://api.peci.org/up) — optionnel mais recommandé"
         required: false
         type: string
         default: ""
@@ -93,10 +90,6 @@ jobs:
           ref: main
           path: deploy-kit
 
-      - name: Timestamp de la release
-        id: meta
-        run: echo "timestamp=$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
-
       # ---------------------------------------------------------------------
       # Build — Laravel
       # ---------------------------------------------------------------------
@@ -122,9 +115,8 @@ jobs:
           npm ci
           npm run build
 
-      - name: Préparer le paquet de release (Laravel)
+      - name: Préparer le paquet à déployer (Laravel)
         if: inputs.stack == 'laravel'
-        id: package_laravel
         run: |
           mkdir -p /tmp/release
           rsync -a \
@@ -151,7 +143,7 @@ jobs:
           npm ci
           npm run build
 
-      - name: Préparer le paquet de release (Next.js standalone)
+      - name: Préparer le paquet à déployer (Next.js standalone)
         if: inputs.stack == 'nextjs-passenger'
         run: |
           APP="app/${{ inputs.app_path }}"
@@ -166,7 +158,7 @@ jobs:
           [ -d "$APP/public" ] && rsync -a "$APP/public/" /tmp/release/public/ || true
 
       # ---------------------------------------------------------------------
-      # Transport SSH (ADR-0001) + activation (ADR-0002)
+      # Transport SSH (ADR-0001) + déploiement direct (ADR-0002)
       # ---------------------------------------------------------------------
       - name: Configurer la clé SSH
         run: |
@@ -184,13 +176,15 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "mkdir -p '${{ inputs.deploy_path }}/releases/${{ steps.meta.outputs.timestamp }}' '${{ inputs.deploy_path }}/.deploy-scripts'"
+            "mkdir -p '${{ inputs.deploy_path }}' '${{ inputs.deploy_path }}/.deploy-scripts'"
 
-      - name: Envoyer la release sur le serveur
+      - name: Déployer le code sur le serveur (écrase en place)
         run: |
-          rsync -az -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes" \
+          EXCLUDES="--exclude=.deploy-scripts"
+          [ "${{ inputs.stack }}" = "laravel" ] && EXCLUDES="$EXCLUDES --exclude=.env --exclude=storage"
+          rsync -az --delete $EXCLUDES -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes" \
             /tmp/release/ \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ inputs.deploy_path }}/releases/${{ steps.meta.outputs.timestamp }}/"
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ inputs.deploy_path }}/"
 
       - name: Envoyer les scripts de déploiement (toujours à jour, ADR-0004)
         run: |
@@ -198,11 +192,11 @@ jobs:
             deploy-kit/scripts/ \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ inputs.deploy_path }}/.deploy-scripts/"
 
-      - name: Activer la release (bascule symlink + restart + healthcheck)
+      - name: Finaliser le déploiement (install/migrate ou restart + healthcheck)
         run: |
           SCRIPT="deploy-laravel.sh"
           [ "${{ inputs.stack }}" = "nextjs-passenger" ] && SCRIPT="deploy-nextjs-passenger.sh"
 
           ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "DEPLOY_PATH='${{ inputs.deploy_path }}' TIMESTAMP='${{ steps.meta.outputs.timestamp }}' KEEP_RELEASES='${{ inputs.keep_releases }}' HEALTH_CHECK_URL='${{ inputs.health_check_url }}' PHP_BIN='${{ inputs.php_bin }}' COMPOSER_BIN='${{ inputs.composer_bin }}' bash '${{ inputs.deploy_path }}/.deploy-scripts/${SCRIPT}'"
+            "DEPLOY_PATH='${{ inputs.deploy_path }}' HEALTH_CHECK_URL='${{ inputs.health_check_url }}' PHP_BIN='${{ inputs.php_bin }}' COMPOSER_BIN='${{ inputs.composer_bin }}' bash '${{ inputs.deploy_path }}/.deploy-scripts/${SCRIPT}'"

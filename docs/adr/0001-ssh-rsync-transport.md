@@ -18,13 +18,13 @@ tel quel (voir « Limites » plus bas).
 Le transport standard est **SSH** (clé dédiée, sans passphrase, autorisée
 côté cPanel) pour :
 - `rsync` (ou `scp` en repli si `rsync` est absent du serveur) pour envoyer
-  les artefacts de build vers `releases/<timestamp>/` ;
+  les artefacts de build directement dans `deploy_path` (ADR-0002) ;
 - des commandes shell exécutées à distance (`ssh host 'script...'`) pour la
-  bascule de symlink, l'installation serveur des dépendances PHP et le
+  l'installation serveur des dépendances PHP et le
   redémarrage de l'application Node.
 
 FTP et le déploiement Git natif de cPanel (`.cpanel.yml`) sont écartés :
-moins observables depuis GitHub Actions, pas de bascule atomique possible
+moins observables depuis GitHub Actions, pas de contrôle fin possible
 avec FTP seul.
 
 ## Conséquences

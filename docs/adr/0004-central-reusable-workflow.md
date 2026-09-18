@@ -7,7 +7,7 @@ Accepté (2026-09-18)
 Chaque projet XSEL a jusqu'ici réinventé son propre script de déploiement
 (voir `dolci-reva/deploy/`, `nounou/deploy/`, `folioas` `DEPLOY.md`, etc.),
 avec des variations non justifiées par de vraies différences de besoin.
-Corriger un bug de déploiement (ex. mauvaise gestion du rollback) oblige à
+Corriger un bug de déploiement (ex. mauvaise gestion des migrations) oblige à
 le corriger séparément dans chaque projet.
 
 ## Décision
@@ -25,9 +25,9 @@ le corriger séparément dans chaque projet.
     sous-dossier...) — ce fichier *est* la configuration, pas besoin d'un
     fichier YAML séparé à maintenir en double ;
   - les secrets GitHub (clé SSH, host/port/user) ;
-  - côté serveur, un `shared/.env` (Laravel) créé une fois à la main.
+  - côté serveur, un `.env` (Laravel) créé une fois à la main dans `deploy_path`.
 - Toute évolution du comportement de déploiement (nouvelle stack, correctif
-  de bug, amélioration du rollback) se fait **une seule fois ici**, puis se
+  de bug, simplification du transport) se fait **une seule fois ici**, puis se
   propage aux projets consommateurs au déploiement suivant — sans action de
   leur part si le workflow appelant référence `@main` (ou une version taguée
   si un projet a besoin de figer une version).

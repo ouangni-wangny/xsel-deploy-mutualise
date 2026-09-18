@@ -25,7 +25,6 @@ jobs:
       app_path: backend
       deploy_path: /home/xselcpaneluser/api.peci.org
       health_check_url: https://api.peci.org/up
-      keep_releases: 5
       # CloudLinux uniquement (voir README) : chemins réels si /usr/bin/php
       # et 'composer' ne correspondent pas à la version voulue.
       # php_bin: /opt/alt/php83/usr/bin/php
@@ -60,7 +59,6 @@ jobs:
       app_path: frontend
       deploy_path: /home/xselcpaneluser/peci.org
       health_check_url: https://peci.org
-      keep_releases: 5
     secrets:
       SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
       SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
