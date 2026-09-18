@@ -128,14 +128,55 @@ Copier [`templates/caller-workflow.example.yml`](templates/caller-workflow.examp
 dans `.github/workflows/` du projet, adapter `stack` / `app_path` /
 `deploy_path` / `health_check_url`.
 
-### 8. Premier déploiement
+Si le `deploy_path` d'une autre app de ce même projet est un sous-dossier
+de celui-ci (cas standard cPanel : un sous-domaine `api.example.com` qui
+vit physiquement dans `example.com/api`), ajouter `protect_paths` pour
+éviter que `rsync --delete` ne l'efface au déploiement de l'app parente :
+```yaml
+protect_paths: |
+  api
+```
+
+### 8. Ajouter le monitoring (optionnel mais recommandé)
+
+Copier [`templates/monitor-caller.example.yml`](templates/monitor-caller.example.yml)
+dans `.github/workflows/monitor.yml` du projet, adapter les URLs. Tourne
+indépendamment des déploiements (cron toutes les 15 min) — détecte une
+panne qui n'a rien à voir avec un push (serveur down, certificat expiré,
+modification manuelle cassée). GitHub envoie un email au propriétaire du
+repo si ce workflow échoue, sans configuration supplémentaire.
+
+### 9. Premier déploiement
 
 Push sur `main` → déploiement automatique. En cas de problème après coup,
 pas de rollback automatisé (voir ADR-0002) : revert le commit fautif sur
 GitHub et repush, ou corrige directement sur le serveur.
 
+## Sauvegardes
+
+- **Base de données** : `deploy-laravel.sh` fait un `mysqldump` avant
+  chaque `migrate --force`, dans `<deploy_path>/.backups/db/` (5 dumps
+  compressés conservés, purge automatique des plus anciens). Ne bloque
+  jamais le déploiement si `mysqldump` échoue ou est absent.
+- **`.env` de prod** : n'existe que sur le serveur par défaut — aucune
+  copie automatique. Recommandé : après l'avoir rempli (étape 5),
+  sauvegarder son contenu comme secret GitHub du projet consommateur
+  (`gh secret set PROD_ENV_BACKUP --repo <owner>/<repo> < .env`) comme
+  copie de secours en cas de perte du fichier serveur — à remettre à jour
+  manuellement si le `.env` change.
+
+## Qualité du kit lui-même
+
+[`lint.yml`](.github/workflows/lint.yml) valide ce repo à chaque push :
+`actionlint` sur les workflows (aurait attrapé un input retiré mais
+encore référencé ailleurs), `shellcheck` sur les scripts serveur. Un
+projet consommateur qui pointe sur `@main` hérite de tout changement
+ici dès son prochain déploiement (voir ADR-0004) — ce lint est donc la
+seule protection avant que ce repo ne casse tout le monde en même temps.
+
 ## Statut
 
-Conçu et validé (ADR) avec PECI comme premier projet de référence — pas
-encore éprouvé en déploiement réel. À faire évoluer au fil des premiers
-déploiements avant de tagger une v1.
+Conçu et validé (ADR) avec PECI comme premier projet de référence, et
+éprouvé en déploiement réel (plusieurs incidents rencontrés et corrigés —
+voir l'historique des ADR et des commits). À tagger en `v1.0.0` une fois
+stabilisé sur quelques semaines d'usage sans incident.

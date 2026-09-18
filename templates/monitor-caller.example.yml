@@ -1,0 +1,19 @@
+# Exemple : .github/workflows/monitor.yml dans un projet consommateur
+# (copier-adapter). Tourne indépendamment des déploiements — GitHub
+# envoie un email au propriétaire du repo si ce workflow échoue, aucune
+# intégration Slack/autre nécessaire pour démarrer.
+
+name: Monitor
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/monitor.yml@main
+    with:
+      urls: |
+        https://api.peci.org/up
+        https://peci.org

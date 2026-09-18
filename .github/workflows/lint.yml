@@ -1,0 +1,28 @@
+name: Lint
+
+# Valide ce repo lui-même (pas un projet consommateur) : erreurs de schéma
+# GitHub Actions (ex. input retiré mais encore référencé quelque part) et
+# bugs shell dans les scripts serveur — avant qu'un push ici ne casse le
+# déploiement de tous les projets qui utilisent ce kit.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh

@@ -1,0 +1,34 @@
+name: Monitor (healthcheck périodique)
+
+# Workflow réutilisable — indépendant des déploiements. Un site peut tomber
+# pour une raison qui n'a rien à voir avec un déploiement (panne serveur,
+# certificat expiré, modification manuelle cassée côté cPanel) : rien ne
+# le détecte tant que personne ne visite le site. Un projet consommateur
+# l'appelle sur un cron (voir templates/monitor-caller.example.yml).
+
+on:
+  workflow_call:
+    inputs:
+      urls:
+        description: "URLs à vérifier (une par ligne)"
+        required: true
+        type: string
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Vérifier chaque URL
+        run: |
+          FAIL=0
+          while IFS= read -r url; do
+            [ -z "$url" ] && continue
+            if curl -fsS -o /dev/null --max-time 15 "$url"; then
+              echo "✅ $url"
+            else
+              echo "::error::$url ne répond pas (ou erreur HTTP)"
+              FAIL=1
+            fi
+          done <<< "${{ inputs.urls }}"
+          exit "$FAIL"

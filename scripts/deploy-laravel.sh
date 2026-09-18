@@ -38,6 +38,8 @@ log "artisan config:cache / route:cache / view:cache"
 "$PHP_BIN" artisan route:cache
 "$PHP_BIN" artisan view:cache
 
+backup_database "${DEPLOY_PATH}/.env" "${DEPLOY_PATH}/.backups/db" 5
+
 log "artisan migrate --force"
 "$PHP_BIN" artisan migrate --force
 

@@ -61,6 +61,17 @@ on:
         required: false
         type: string
         default: ""
+      protect_paths:
+        description: >
+          Chemins relatifs à deploy_path à protéger de la suppression par
+          `rsync --delete` (un par ligne) — nécessaire quand le deploy_path
+          d'une autre app est un sous-dossier de celui-ci (cas standard
+          cPanel : un sous-domaine backend.example.com vit physiquement
+          dans example.com/backend). Sans ça, --delete effacerait ce
+          sous-dossier au déploiement de l'app parente.
+        required: false
+        type: string
+        default: ""
     secrets:
       SSH_HOST:
         required: true
@@ -202,17 +213,46 @@ jobs:
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
             "mkdir -p '${{ inputs.deploy_path }}' '${{ inputs.deploy_path }}/.deploy-scripts'"
 
-      - name: Déployer le code sur le serveur (écrase en place)
-        # PAS de --delete : sur cet hébergement, le deploy_path d'une app
-        # peut être un sous-dossier du deploy_path d'une autre (ex. un
-        # sous-domaine backend.example.com vivant dans example.com/backend,
-        # cas standard cPanel). --delete effacerait alors ce sous-dossier
-        # au déploiement de l'app parente, qui n'a aucune notion de son
-        # existence. Contrepartie acceptée : un fichier supprimé du repo
-        # reste sur le serveur jusqu'au prochain nettoyage manuel.
+      - name: Préflight — vérifier le serveur avant de déployer
+        # Échoue vite et avec un message clair plutôt qu'au milieu du
+        # transfert/déploiement (cas vécus : rsync trop ancien pour une
+        # option utilisée, php_bin/composer_bin introuvables au chemin
+        # configuré, plus de place disque).
         run: |
-          rsync -az \
-            --exclude=.deploy-scripts \
+          SCRIPT="command -v rsync >/dev/null || { echo '::error::rsync introuvable sur le serveur'; exit 1; }
+          echo \"rsync (serveur) : \$(rsync --version | head -1)\""
+
+          if [ "${{ inputs.stack }}" = "laravel" ]; then
+            SCRIPT="$SCRIPT
+          command -v '${{ inputs.php_bin }}' >/dev/null || { echo \"::error::php_bin introuvable : ${{ inputs.php_bin }}\"; exit 1; }
+          command -v '${{ inputs.composer_bin }}' >/dev/null || { echo \"::error::composer_bin introuvable : ${{ inputs.composer_bin }}\"; exit 1; }
+          echo \"php_bin : \$('${{ inputs.php_bin }}' -v | head -1)\""
+          fi
+
+          SCRIPT="$SCRIPT
+          FREE_MB=\$(df -Pm '${{ inputs.deploy_path }}' 2>/dev/null | tail -1 | awk '{print \$4}')
+          echo \"espace disque libre : \${FREE_MB:-?} Mo\"
+          [ -n \"\$FREE_MB\" ] && [ \"\$FREE_MB\" -lt 100 ] && { echo '::error::moins de 100 Mo disponibles sur le serveur'; exit 1; }
+          exit 0"
+
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$SCRIPT"
+
+      - name: Déployer le code sur le serveur (écrase en place)
+        # --delete réactivé, mais avec des exclusions protégées : sans ça,
+        # un fichier retiré du repo resterait indéfiniment sur le serveur.
+        # .deploy-scripts/.backups sont toujours protégés ; protect_paths
+        # ajoute les cas projet (ex. sous-dossier d'une autre app imbriquée).
+        run: |
+          EXCLUDES=(--exclude=.deploy-scripts --exclude=.backups)
+          if [ "${{ inputs.stack }}" = "laravel" ]; then
+            EXCLUDES+=(--exclude=.env --exclude=storage)
+          fi
+          while IFS= read -r p; do
+            [ -n "$p" ] && EXCLUDES+=(--exclude="$p")
+          done <<< "${{ inputs.protect_paths }}"
+
+          rsync -az --delete "${EXCLUDES[@]}" \
             -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes" \
             /tmp/release/ \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ inputs.deploy_path }}/"
