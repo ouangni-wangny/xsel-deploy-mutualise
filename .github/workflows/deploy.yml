@@ -250,6 +250,14 @@ jobs:
           if [ "${{ inputs.stack }}" = "laravel" ]; then
             EXCLUDES+=(--exclude=.env --exclude=storage)
           fi
+          if [ "${{ inputs.stack }}" = "nextjs-passenger" ]; then
+            # cPanel "Setup Node.js App" génère son propre .htaccess (routage
+            # Passenger) au moment où l'app est créée — ni suivi en git, ni
+            # reproductible depuis le repo. --delete l'effacerait sinon à
+            # chaque déploiement (incident vécu sur PECI). tmp/ protégé pour
+            # la même raison (état géré par Passenger, pas par le déploiement).
+            EXCLUDES+=(--exclude=.htaccess --exclude=tmp)
+          fi
           while IFS= read -r p; do
             [ -n "$p" ] && EXCLUDES+=(--exclude="$p")
           done <<< "${{ inputs.protect_paths }}"

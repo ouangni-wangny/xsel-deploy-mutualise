@@ -18,9 +18,13 @@ Chaque déploiement **écrase le code en place**, directement dans
 └── ...                     ← code applicatif (écrasé à chaque déploiement)
 ```
 
-`rsync` (sans `--delete`, voir « Incident » plus bas) synchronise le
-dossier avec le nouveau build ; `.env` et `storage/` (Laravel) ne sont
-jamais inclus dans le paquet source, donc jamais touchés.
+`rsync --delete` synchronise le dossier avec le nouveau build (un fichier
+retiré du repo est bien supprimé du serveur), mais avec des exclusions
+protégées en dur — voir « Incidents » plus bas pour pourquoi chacune
+existe : `.deploy-scripts`, `.backups`, et selon la stack `.env`/`storage`
+(Laravel) ou `.htaccess`/`tmp` (Next.js, généré par cPanel). Plus
+`protect_paths` (configurable par projet) pour les cas de `deploy_path`
+imbriqués entre deux apps.
 
 - Le document root cPanel pointe directement sur `<deploy_path>/public`
   (Laravel) ou `<deploy_path>` (Next.js, "Application root" cPanel) — plus
@@ -50,20 +54,33 @@ garanti, pas de rollback instantané).
 - En cas de déploiement cassé, le temps de rétablissement dépend du temps
   de build + déploiement d'un nouveau commit (pas de bascule instantanée).
 - `scripts/rollback.sh` est retiré du kit (plus rien à quoi l'appliquer).
-- Un fichier supprimé du dépôt reste sur le serveur (pas de `--delete`,
-  voir « Incident » ci-dessous) — nettoyage manuel occasionnel à prévoir.
+- Tout fichier placé manuellement sur le serveur (hors `.env`/`storage`)
+  et non suivi en git est supprimé au prochain déploiement, sauf s'il
+  entre dans une des exclusions protégées ci-dessus. Un fichier Laravel
+  comme `.htaccess` doit être suivi en git (voir
+  `templates/laravel.htaccess.example`) précisément pour cette raison.
 
-## Incident — pourquoi pas de `rsync --delete`
-Première tentative de cette révision : `rsync --delete` pour que chaque
-déploiement supprime aussi les fichiers retirés du dépôt. Sur PECI, le
-sous-domaine `backend.peci-ci.com` vit dans un sous-dossier du
-`deploy_path` du frontend (`peci-ci.com/backend`, un chemin cPanel
-standard pour un sous-domaine). Le déploiement du frontend a supprimé
-tout le dossier `backend/` : `--delete` traite tout ce qui n'est pas dans
-le nouveau build comme obsolète, y compris le déploiement d'une autre
-app qui se trouve avoir un `deploy_path` imbriqué. Retiré du kit —
-inspecter/nettoyer les fichiers obsolètes manuellement plutôt que risquer
-ce genre de suppression croisée entre apps.
+## Incidents rencontrés (tous corrigés, gardés pour mémoire)
+
+**1. `backend/` effacé par le déploiement du frontend.** Première
+tentative avec `--delete` sans protection : sur PECI, le sous-domaine
+`backend.peci-ci.com` vit dans un sous-dossier du `deploy_path` du
+frontend (`peci-ci.com/backend`, chemin cPanel standard pour un
+sous-domaine). `--delete` a traité ce sous-dossier comme obsolète et l'a
+supprimé en entier. → `--delete` retiré temporairement, puis réintroduit
+avec l'input `protect_paths`.
+
+**2. `.htaccess` généré par cPanel effacé, deux fois.** (a) Un
+`.htaccess` Laravel placé manuellement à la racine du projet backend
+(réécriture vers `public/`, pattern qui évite de changer le document
+root cPanel) a été supprimé car non suivi en git → déplacé en git, suivi
+comme n'importe quel fichier du projet (voir `laravel.htaccess.example`).
+(b) Le `.htaccess` que cPanel *lui-même* génère à la création d'une app
+via *Setup Node.js App* (routage Passenger) a ensuite été supprimé par
+le déploiement du frontend suivant — celui-là n'est pas reproductible
+depuis un repo (spécifique à l'instance cPanel) → exclu en dur du
+`--delete` pour la stack `nextjs-passenger` (avec `tmp/`, même
+raisonnement).
 
 ## Contexte historique (schéma initial, abandonné)
 Le schéma initial reposait sur `releases/<timestamp>/` + symlink
