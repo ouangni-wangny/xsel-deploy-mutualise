@@ -176,17 +176,25 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
+      - name: Créer les dossiers de destination sur le serveur
+        # `rsync --mkpath` n'existe que depuis rsync 3.2.3 — beaucoup
+        # d'hébergements mutualisés tournent encore une version plus
+        # ancienne (ex. 3.1.3), qui rejette l'option et casse le flux
+        # protocole rsync (exit code 12). On crée les dossiers nous-mêmes.
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "mkdir -p '${{ inputs.deploy_path }}/releases/${{ steps.meta.outputs.timestamp }}' '${{ inputs.deploy_path }}/.deploy-scripts'"
+
       - name: Envoyer la release sur le serveur
         run: |
           rsync -az -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes" \
-            --mkpath \
             /tmp/release/ \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ inputs.deploy_path }}/releases/${{ steps.meta.outputs.timestamp }}/"
 
       - name: Envoyer les scripts de déploiement (toujours à jour, ADR-0004)
         run: |
           rsync -az -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes" \
-            --mkpath \
             deploy-kit/scripts/ \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ inputs.deploy_path }}/.deploy-scripts/"
 
