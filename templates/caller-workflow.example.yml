@@ -59,6 +59,11 @@ jobs:
       app_path: frontend
       deploy_path: /home/xselcpaneluser/peci.org
       health_check_url: https://peci.org
+      # Toute variable NEXT_PUBLIC_* lue côté client doit être ici, sinon
+      # elle vaudra undefined dans le bundle buildé (jamais relue au
+      # runtime via cPanel) :
+      build_env: |
+        NEXT_PUBLIC_API_URL=https://api.peci.org
     secrets:
       SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
       SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}

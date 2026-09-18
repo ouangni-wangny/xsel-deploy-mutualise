@@ -49,6 +49,18 @@ on:
         required: false
         type: string
         default: "composer"
+      build_env:
+        description: >
+          Variables exposées pendant le build (une par ligne, KEY=VALUE) —
+          pour Next.js, tout NEXT_PUBLIC_* doit être fourni ici : ces
+          variables sont figées dans le bundle au build, jamais relues au
+          runtime (inutile de les définir seulement dans cPanel Setup
+          Node.js App). Non secrètes par nature (exposées côté client) —
+          si une valeur est sensible, passer par `secrets` et ne pas
+          l'utiliser dans une variable NEXT_PUBLIC_*.
+        required: false
+        type: string
+        default: ""
     secrets:
       SSH_HOST:
         required: true
@@ -89,6 +101,10 @@ jobs:
           repository: ouangni-wangny/xsel-deploy-mutualise
           ref: main
           path: deploy-kit
+
+      - name: Exposer build_env aux étapes de build suivantes
+        if: inputs.build_env != ''
+        run: echo "${{ inputs.build_env }}" >> "$GITHUB_ENV"
 
       # ---------------------------------------------------------------------
       # Build — Laravel
