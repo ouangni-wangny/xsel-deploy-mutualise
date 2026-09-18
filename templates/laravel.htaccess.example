@@ -1,0 +1,19 @@
+# À placer à la racine du projet Laravel (backend/.htaccess dans le repo,
+# PAS dans backend/public/.htaccess qui a son propre .htaccess généré par
+# Laravel) — voir README, section "Configurer cPanel pour servir l'app".
+#
+# Permet de laisser le document root cPanel sur la racine du projet (le
+# défaut cPanel pour un nouveau sous-domaine, aucune manip Domains requise)
+# au lieu de devoir le changer manuellement vers <deploy_path>/public.
+
+# BEGIN Laravel Rewrite Rules
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Rediriger toutes les demandes vers le répertoire public
+    RewriteRule ^(.*)$ public/$1 [L]
+
+    # Autres règles de réécriture pour Laravel (si nécessaire)
+</IfModule>
+# END Laravel Rewrite Rules

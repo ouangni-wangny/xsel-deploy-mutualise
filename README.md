@@ -116,8 +116,16 @@ nano /home/<user>/<app>/.env
 
 ### 6. Configurer cPanel pour servir l'app
 
-- **Laravel** : cPanel → *Domains* → document root du (sous-)domaine sur
-  `<deploy_path>/public`.
+- **Laravel** — deux options :
+  - **Recommandé, sans manip cPanel** : copier
+    [`templates/laravel.htaccess.example`](templates/laravel.htaccess.example)
+    vers la racine du projet dans le repo (`backend/.htaccess`, committé,
+    donc redéployé automatiquement à chaque fois — pas `public/.htaccess`,
+    qui a le sien). Fonctionne avec le document root par défaut de cPanel
+    pour un nouveau (sous-)domaine (la racine du projet).
+  - **Alternative** : cPanel → *Domains* → changer le document root du
+    (sous-)domaine vers `<deploy_path>/public` — dans ce cas, pas besoin
+    du `.htaccess` racine.
 - **Next.js** : cPanel → *Setup Node.js App* → *Create Application*,
   fichier de démarrage `server.js` — détail dans
   [`templates/passenger-nextjs-notes.md`](templates/passenger-nextjs-notes.md).
