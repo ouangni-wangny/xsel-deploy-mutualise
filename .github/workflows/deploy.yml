@@ -190,7 +190,9 @@ jobs:
           rsync -a "$APP/.next/standalone/" /tmp/release/
           mkdir -p /tmp/release/.next
           rsync -a "$APP/.next/static/" /tmp/release/.next/static/
-          [ -d "$APP/public" ] && rsync -a "$APP/public/" /tmp/release/public/ || true
+          if [ -d "$APP/public" ]; then
+            rsync -a "$APP/public/" /tmp/release/public/
+          fi
 
       # ---------------------------------------------------------------------
       # Transport SSH (ADR-0001) + déploiement direct (ADR-0002)
