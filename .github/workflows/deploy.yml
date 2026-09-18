@@ -76,6 +76,14 @@ jobs:
     name: Build & deploy (${{ inputs.stack }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Deux déploiements simultanés vers le même deploy_path (ex. un push et
+    # un workflow_dispatch qui se chevauchent) pourraient interleaver leurs
+    # rsync/artisan sur le serveur. Un déploiement en attend un autre plutôt
+    # que de les annuler (cancel-in-progress: false) pour ne jamais couper
+    # un rsync en plein milieu.
+    concurrency:
+      group: deploy-${{ inputs.deploy_path }}
+      cancel-in-progress: false
     steps:
       - name: Valider la stack demandée
         run: |
