@@ -18,9 +18,9 @@ Chaque déploiement **écrase le code en place**, directement dans
 └── ...                     ← code applicatif (écrasé à chaque déploiement)
 ```
 
-`rsync --delete` synchronise le dossier avec le nouveau build, à
-l'exception de `.env` et `storage/` (Laravel), explicitement exclus pour
-persister entre déploiements.
+`rsync` (sans `--delete`, voir « Incident » plus bas) synchronise le
+dossier avec le nouveau build ; `.env` et `storage/` (Laravel) ne sont
+jamais inclus dans le paquet source, donc jamais touchés.
 
 - Le document root cPanel pointe directement sur `<deploy_path>/public`
   (Laravel) ou `<deploy_path>` (Next.js, "Application root" cPanel) — plus
@@ -50,6 +50,20 @@ garanti, pas de rollback instantané).
 - En cas de déploiement cassé, le temps de rétablissement dépend du temps
   de build + déploiement d'un nouveau commit (pas de bascule instantanée).
 - `scripts/rollback.sh` est retiré du kit (plus rien à quoi l'appliquer).
+- Un fichier supprimé du dépôt reste sur le serveur (pas de `--delete`,
+  voir « Incident » ci-dessous) — nettoyage manuel occasionnel à prévoir.
+
+## Incident — pourquoi pas de `rsync --delete`
+Première tentative de cette révision : `rsync --delete` pour que chaque
+déploiement supprime aussi les fichiers retirés du dépôt. Sur PECI, le
+sous-domaine `backend.peci-ci.com` vit dans un sous-dossier du
+`deploy_path` du frontend (`peci-ci.com/backend`, un chemin cPanel
+standard pour un sous-domaine). Le déploiement du frontend a supprimé
+tout le dossier `backend/` : `--delete` traite tout ce qui n'est pas dans
+le nouveau build comme obsolète, y compris le déploiement d'une autre
+app qui se trouve avoir un `deploy_path` imbriqué. Retiré du kit —
+inspecter/nettoyer les fichiers obsolètes manuellement plutôt que risquer
+ce genre de suppression croisée entre apps.
 
 ## Contexte historique (schéma initial, abandonné)
 Le schéma initial reposait sur `releases/<timestamp>/` + symlink

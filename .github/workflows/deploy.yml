@@ -179,10 +179,17 @@ jobs:
             "mkdir -p '${{ inputs.deploy_path }}' '${{ inputs.deploy_path }}/.deploy-scripts'"
 
       - name: Déployer le code sur le serveur (écrase en place)
+        # PAS de --delete : sur cet hébergement, le deploy_path d'une app
+        # peut être un sous-dossier du deploy_path d'une autre (ex. un
+        # sous-domaine backend.example.com vivant dans example.com/backend,
+        # cas standard cPanel). --delete effacerait alors ce sous-dossier
+        # au déploiement de l'app parente, qui n'a aucune notion de son
+        # existence. Contrepartie acceptée : un fichier supprimé du repo
+        # reste sur le serveur jusqu'au prochain nettoyage manuel.
         run: |
-          EXCLUDES="--exclude=.deploy-scripts"
-          [ "${{ inputs.stack }}" = "laravel" ] && EXCLUDES="$EXCLUDES --exclude=.env --exclude=storage"
-          rsync -az --delete $EXCLUDES -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes" \
+          rsync -az \
+            --exclude=.deploy-scripts \
+            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes" \
             /tmp/release/ \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ inputs.deploy_path }}/"
 
