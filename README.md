@@ -290,6 +290,10 @@ ce repo ne casse tout le monde en même temps.
 - **`protect_paths` est manuel** : aucune détection automatique des
   `deploy_path` imbriqués entre apps d'un même projet — à identifier et
   déclarer soi-même à l'onboarding.
+- **Connexions SSH limitées par l'hébergeur** : le kit n'ouvre que 2
+  connexions (ADR-0006), mais un pare-feu plus strict que ça reste
+  bloquant — symptôme : `Connection timed out` (pas `Permission denied`)
+  dès l'étape « Configurer la clé SSH ». À faire lever côté hébergeur.
 - **Pas de runbook de rotation de secrets** (clé SSH, mot de passe DB) —
   à faire à la main si compromission ou changement d'équipe.
 - **Pas d'environnement de staging** — tout push sur `main` part en
@@ -301,7 +305,11 @@ Conçu par ADR, validé en conditions réelles sur PECI (plusieurs incidents
 rencontrés et corrigés en direct — voir les ADR et l'historique des
 commits). Versions taguées :
 
-- **`v1.0.1`** (courant) — protège `.htaccess`/`tmp` générés par cPanel
+- **`v1.0.2`** (courant) — une seule connexion SSH par déploiement
+  (`ControlMaster`), `ConnectTimeout` et retry : corrige les blocages
+  « `ssh: connect … Connection timed out` » sur les hébergeurs qui limitent
+  les connexions par IP ([ADR-0006](docs/adr/0006-ssh-connection-multiplexing.md)).
+- **`v1.0.1`** — protège `.htaccess`/`tmp` générés par cPanel
   (`nextjs-passenger`) de `rsync --delete`.
 - **`v1.0.0`** — première version stable : sauvegarde DB, `--delete`
   sécurisé (`protect_paths`), préflight, lint, monitoring périodique.
