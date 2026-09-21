@@ -359,6 +359,30 @@ runs:
           "$SSH_USER@$SSH_HOST" \
           "DEPLOY_PATH='${DEPLOY_PATH}' HEALTH_CHECK_URL='${HEALTH_URL}' PHP_BIN='${RESOLVED_PHP_BIN:-}' COMPOSER_BIN='${COMPOSER_BIN}' COMPOSER_ON_SERVER='${COMPOSER_ON_SERVER}' bash '${DEPLOY_PATH}/.deploy-scripts/${SCRIPT}'"
 
+    - name: Résumé du déploiement
+      if: always()
+      shell: bash
+      env:
+        JOB_STATUS: ${{ job.status }}
+        PROJECT_SHA: ${{ github.sha }}
+      run: |
+        KIT_SHA="$(git -C deploy-kit rev-parse --short HEAD 2>/dev/null || echo '?')"
+        ICON="✅"; [ "$JOB_STATUS" = "success" ] || ICON="❌"
+        {
+          echo "### ${ICON} Déploiement — \`${APP_PATH}\` → \`${DEPLOY_PATH}\`"
+          echo
+          echo "| | |"
+          echo "|---|---|"
+          echo "| Statut | ${JOB_STATUS} |"
+          echo "| Stack | ${STACK:-?} |"
+          [ -n "${RESOLVED_PHP_VERSION:-}" ] && echo "| PHP (build = serveur) | ${RESOLVED_PHP_VERSION} — \`${RESOLVED_PHP_BIN}\` |"
+          [ -n "${REQUIRED_EXTS:-}" ] && echo "| Extensions PHP vérifiées | $(echo "$REQUIRED_EXTS" | wc -w | tr -d ' ') |"
+          [ -n "$HEALTH_URL" ] && echo "| Site | ${HEALTH_URL} |"
+          echo "| Commit du projet | \`${PROJECT_SHA:0:7}\` |"
+          echo "| Version du kit | \`${KIT_SHA}\` |"
+        } >> "$GITHUB_STEP_SUMMARY"
+        exit 0
+
     - name: Fermer la connexion SSH partagée
       if: always()
       shell: bash

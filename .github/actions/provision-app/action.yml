@@ -1,0 +1,96 @@
+name: Provisionner une application
+description: >
+  Prépare UNE FOIS une app fraîche sur le serveur : dossiers, base MySQL + utilisateur
+  (API cPanel uapi) et `.env` de production complet (Laravel). Idempotent : ne touche
+  à rien si `.env` existe déjà. Pour Next.js/Passenger : crée seulement le dossier
+  (l'app Node se déclare dans cPanel → Setup Node.js App). Prérequis du job appelant :
+  projet dans `app/`, kit dans `deploy-kit/` (checkout de job.workflow_sha).
+
+inputs:
+  stack:
+    description: auto | laravel | nextjs-passenger
+    required: false
+    default: auto
+  app_path:
+    description: Sous-dossier du projet contenant l'app
+    required: false
+    default: "."
+  deploy_path:
+    description: Chemin absolu sur le serveur
+    required: true
+  health_check_url:
+    description: URL publique de l'app (devient APP_URL)
+    required: false
+    default: ""
+  database:
+    description: Nom COURT de la base MySQL à créer (le préfixe cPanel est ajouté) ; vide = aucune
+    required: false
+    default: ""
+  ssh_host:
+    description: Hôte SSH
+    required: true
+  ssh_port:
+    description: Port SSH
+    required: true
+  ssh_user:
+    description: Utilisateur SSH
+    required: true
+  ssh_private_key:
+    description: Clé privée de déploiement
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Détecter la stack
+      id: detect
+      shell: bash
+      env:
+        STACK_INPUT: ${{ inputs.stack }}
+        APP_PATH: ${{ inputs.app_path }}
+      run: |
+        OUT="$(bash deploy-kit/scripts/detect-app.sh "app/${APP_PATH}")" || { echo "$OUT"; exit 1; }
+        echo "$OUT" | grep -E '^stack=' >> "$GITHUB_OUTPUT"
+
+    - name: Configurer SSH (connexion partagée)
+      uses: ./deploy-kit/.github/actions/ssh-setup
+      with:
+        host: ${{ inputs.ssh_host }}
+        port: ${{ inputs.ssh_port }}
+        user: ${{ inputs.ssh_user }}
+        private_key: ${{ inputs.ssh_private_key }}
+
+    - name: Provisionner
+      shell: bash
+      env:
+        STACK: ${{ steps.detect.outputs.stack }}
+        APP_PATH: ${{ inputs.app_path }}
+        DEPLOY_PATH: ${{ inputs.deploy_path }}
+        HEALTH_URL: ${{ inputs.health_check_url }}
+        DB_NAME: ${{ inputs.database }}
+        SSH_HOST: ${{ inputs.ssh_host }}
+        SSH_PORT: ${{ inputs.ssh_port }}
+        SSH_USER: ${{ inputs.ssh_user }}
+      run: |
+        rssh() { ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "$@"; }
+        if [ "$STACK" = "laravel" ]; then
+          ENV_B64=""
+          [ -f "app/${APP_PATH}/.env.example" ] && ENV_B64="$(base64 < "app/${APP_PATH}/.env.example" | tr -d '\n')"
+          # APP_URL = origine de l'URL publique (schéma + hôte)
+          APP_URL=""
+          [ -n "$HEALTH_URL" ] && APP_URL="${HEALTH_URL%%://*}://$(printf '%s' "${HEALTH_URL#*://}" | cut -d/ -f1)"
+          rssh "DEPLOY_PATH='${DEPLOY_PATH}' APP_URL='${APP_URL}' DB_NAME='${DB_NAME}' ENV_EXAMPLE_B64='${ENV_B64}' bash -s" \
+            < deploy-kit/scripts/provision-laravel.sh | tee -a "$GITHUB_STEP_SUMMARY"
+        else
+          rssh "mkdir -p '${DEPLOY_PATH}' && echo '✅ ${DEPLOY_PATH} prêt — déclarez l app Node dans cPanel → Setup Node.js App (racine : ${DEPLOY_PATH}, fichier de démarrage : server.js)'" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Fermer la connexion SSH partagée
+      if: always()
+      shell: bash
+      env:
+        SSH_HOST: ${{ inputs.ssh_host }}
+        SSH_PORT: ${{ inputs.ssh_port }}
+        SSH_USER: ${{ inputs.ssh_user }}
+      run: ssh -O exit -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" 2>/dev/null || true

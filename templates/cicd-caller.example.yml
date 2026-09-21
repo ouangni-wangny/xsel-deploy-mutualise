@@ -3,7 +3,8 @@
 # Le kit décide quoi lancer selon l'événement et les fichiers modifiés :
 #   pull_request / push        -> CI des apps concernées
 #   push sur la branche de déploiement -> puis déploiement (une app à la fois)
-#   lancement manuel           -> déploiement, ou diagnostic serveur (action: doctor)
+#   lancement manuel           -> déploiement, diagnostic serveur (action: doctor) ou
+#                                 préparation d'une app fraîche (action: provision)
 #   cron                       -> monitoring des URLs
 name: CI/CD
 
@@ -18,7 +19,7 @@ on:
       action:
         description: "Que faire ?"
         type: choice
-        options: [deploy, doctor]
+        options: [deploy, doctor, provision]
         default: deploy
       apps:
         description: "Apps concernées (noms séparés par des virgules ; vide = toutes)"

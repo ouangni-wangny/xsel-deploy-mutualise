@@ -68,7 +68,7 @@ test_pipeline_n_utilise_que_des_champs_produits_par_plan() {
   done
 }
 test_pipeline_transmet_toutes_les_entrees_de_deploy_app_et_ci_app() {
-  for pair in "deploy-app:Déployer" "ci-app:CI" "doctor-app:Diagnostic"; do
+  for pair in "deploy-app:Déployer" "ci-app:CI" "doctor-app:Diagnostic" "provision-app:Provisionner"; do
     a="${pair%%:*}"; step="${pair##*:}"
     blk="$(awk -v a="$a" '$0 ~ "uses: ./deploy-kit/.github/actions/" a {f=1} f {print} f && /^  [a-z]+:$/ {exit}' "$WF/pipeline.yml")"
     [ -n "$blk" ] || fail "appel de l'action $a introuvable dans pipeline.yml"
@@ -78,7 +78,7 @@ test_pipeline_transmet_toutes_les_entrees_de_deploy_app_et_ci_app() {
   done
 }
 test_pipeline_recupere_le_kit_a_la_version_du_workflow() {
-  n="$(grep -c 'ref: ${{ job.workflow_sha }}' "$WF/pipeline.yml")"; [ "$n" -ge 4 ] || fail "chaque job doit récupérer le kit à job.workflow_sha ($n trouvés)"
+  n="$(grep -c 'ref: ${{ job.workflow_sha }}' "$WF/pipeline.yml")"; [ "$n" -ge 7 ] || fail "chaque job doit récupérer le kit à job.workflow_sha ($n trouvés)"
 }
 test_le_deploiement_est_sequentiel_et_attend_la_ci() {
   blk="$(awk '/^  deploy:/{f=1} f' "$WF/pipeline.yml" | awk 'NR>1 && /^  [a-z]+:$/ {exit} {print}')"

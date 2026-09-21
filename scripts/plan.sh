@@ -9,7 +9,8 @@
 #   push (autre branche)           -> CI des apps modifiées
 #   pull_request                   -> CI des apps modifiées
 #   workflow_dispatch              -> CI + déploiement (toutes, ou ONLY_APPS) ;
-#                                     ACTION=doctor : diagnostic seul
+#                                     ACTION=doctor : diagnostic seul ;
+#                                     ACTION=provision : préparation d'une app fraîche
 #   schedule                       -> monitoring seul
 #
 # Une app est « modifiée » si un fichier sous son `path` a changé, ou si le
@@ -46,8 +47,12 @@ CFG="$(ruby -ryaml -rjson -e 'puts JSON.generate(YAML.safe_load(File.read(ARGV[0
 [ "$(jq -r '.version // empty' <<<"$CFG")" = "1" ] || die "${MANIFEST} : « version: 1 » requis"
 [ "$(jq -r '(.apps // {}) | length' <<<"$CFG")" -gt 0 ] || die "${MANIFEST} : au moins une app sous « apps: » est requise"
 
+# deploy_path : absolu et sans « .. » — sinon rsync --delete pourrait cibler un dossier inattendu.
+jq -r '.apps | to_entries[] | select((.value.deploy_path // "") != "") | select((.value.deploy_path | startswith("/") | not) or (.value.deploy_path | contains(".."))) | .key' <<<"$CFG" \
+  | { bad="$(cat)"; [ -z "$bad" ] || { echo "::error::${MANIFEST} : deploy_path doit être un chemin absolu sans « .. » (app : $(echo "$bad" | tr '\n' ' '))"; exit 1; }; } || exit 1
+
 # Clés inconnues (fautes de frappe) : avertissement, pas d'échec.
-KNOWN_APP='["path","stack","deploy","deploy_path","health_check_url","ci","database","lint","php_version","php_bin","php_extensions","composer_on_server","composer_bin","manage_web_php","build_frontend_assets","node_version","build_env","protect_paths"]'
+KNOWN_APP='["path","stack","deploy","deploy_path","health_check_url","ci","database","lint","php_version","php_bin","php_extensions","composer_on_server","composer_bin","manage_web_php","build_frontend_assets","node_version","build_env","protect_paths","provision"]'
 jq -r --argjson known "$KNOWN_APP" '.apps | to_entries[] | . as $a | ($a.value | keys[]) | select(. as $k | $known | index($k) | not) | "\($a.key): clé inconnue « \(.) »"' <<<"$CFG" \
   | while read -r m; do echo "::warning::${MANIFEST} — ${m}"; done
 jq -r '(keys[]) | select(. as $k | ["version","apps","environment","deploy_branch","monitor"] | index($k) | not) | "clé inconnue « \(.) »"' <<<"$CFG" \
@@ -79,7 +84,9 @@ APPS="$(jq -c 'def d(x): if . == null then x else . end;
     build_frontend_assets: ($v.build_frontend_assets | d(false)),
     node_version: (($v.node_version | d("")) | tostring),
     build_env: (($v.build_env | d({})) | if type=="object" then to_entries | map("\(.key)=\(.value)") | join("\n") else . end),
-    protect_paths: (($v.protect_paths | d([])) | if type=="array" then join("\n") else . end)
+    protect_paths: (($v.protect_paths | d([])) | if type=="array" then join("\n") else . end),
+    provision: (($v.provision | d(false)) != false),
+    provision_database: (if ($v.provision | type) == "object" then (($v.provision.database | d("")) | tostring) else "" end)
   })' <<<"$CFG")"
 
 # build_frontend_assets : false par défaut. Le squelette Laravel embarque toujours
@@ -116,7 +123,7 @@ select_only() { # filtre ONLY_APPS (csv de noms) s'il est fourni
 ON_DEPLOY_BRANCH=false
 [ "$REF" = "refs/heads/${DEPLOY_BRANCH}" ] && ON_DEPLOY_BRANCH=true
 
-CI_APPS="[]"; DEPLOY_APPS="[]"; DOCTOR_APPS="[]"; MONITOR="[]"
+CI_APPS="[]"; DEPLOY_APPS="[]"; DOCTOR_APPS="[]"; PROVISION_APPS="[]"; MONITOR="[]"
 
 case "$EVENT" in
   schedule)
@@ -127,6 +134,8 @@ case "$EVENT" in
     SEL="$(select_only <<<"$APPS")"
     if [ "$ACTION" = "doctor" ]; then
       DOCTOR_APPS="$(jq -c '[ .[] | select(.deploy_path != "") ]' <<<"$SEL")"
+    elif [ "$ACTION" = "provision" ]; then
+      PROVISION_APPS="$(jq -c '[ .[] | select(.provision and .deploy_path != "") ]' <<<"$SEL")"
     else
       CI_APPS="$(jq -c '[ .[] | select(.ci != "none") ]' <<<"$SEL")"
       DEPLOY_APPS="$(jq -c '[ .[] | select(.deploy and .deploy_path != "") ]' <<<"$SEL")"
@@ -151,10 +160,12 @@ emit() { if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "$1=$2" >> "$GITHUB_OUTPUT"; 
 emit ci_apps "$CI_APPS"
 emit deploy_apps "$DEPLOY_APPS"
 emit doctor_apps "$DOCTOR_APPS"
+emit provision_apps "$PROVISION_APPS"
 emit monitor_urls "$MONITOR"
 emit has_ci "$(has "$CI_APPS")"
 emit has_deploy "$(has "$DEPLOY_APPS")"
 emit has_doctor "$(has "$DOCTOR_APPS")"
+emit has_provision "$(has "$PROVISION_APPS")"
 emit has_monitor "$(has "$MONITOR")"
 emit environment "$ENVIRONMENT"
 
@@ -163,4 +174,5 @@ echo "plan — événement=${EVENT} branche_deploiement=${DEPLOY_BRANCH} sur_bra
 echo "  CI      : $(jq -r 'map(.name) | join(", ") | if .=="" then "(aucune)" else . end' <<<"$CI_APPS")" >&2
 echo "  deploy  : $(jq -r 'map(.name) | join(", ") | if .=="" then "(aucune)" else . end' <<<"$DEPLOY_APPS")" >&2
 echo "  doctor  : $(jq -r 'map(.name) | join(", ") | if .=="" then "(aucune)" else . end' <<<"$DOCTOR_APPS")" >&2
+echo "  provision : $(jq -r 'map(.name) | join(", ") | if .=="" then "(aucune)" else . end' <<<"$PROVISION_APPS")" >&2
 echo "  monitor : $(jq -r 'length' <<<"$MONITOR") URL(s)" >&2

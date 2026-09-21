@@ -136,3 +136,23 @@ test_avertit_sur_cle_inconnue_et_sans_health_check() {
   plan workflow_dispatch REF=refs/heads/main
   assert_eq "$RC" 0; assert_contains "$OUT" "clé inconnue « phpversion »"; assert_contains "$OUT" "pas de health_check_url"
 }
+
+test_dispatch_provision_ne_lance_que_les_apps_a_provisionner() {
+  mkrepo
+  cat > .xsel-deploy.yml <<'Y'
+version: 1
+apps:
+  backend: { deploy_path: /a, provision: { database: sis } }
+  frontend: { deploy_path: /b }
+Y
+  git add -A; git commit -q -m m
+  plan workflow_dispatch REF=refs/heads/main ACTION=provision
+  assert_eq "$RC" 0; assert_eq "$(names provision_apps)" "backend"; assert_eq "$(names deploy_apps)" ""; assert_eq "$(names ci_apps)" ""
+  assert_eq "$(echo "$OUT" | sed -n 's/^provision_apps=//p' | jq -r '.[0].provision_database')" "sis"
+  assert_contains "$OUT" "has_provision=true"
+}
+test_provision_n_est_jamais_lance_par_un_push() {
+  mkrepo; printf 'version: 1\napps:\n  backend: {deploy_path: /a, provision: true}\n' > .xsel-deploy.yml; git add -A; git commit -q -m m
+  plan push REF=refs/heads/main BEFORE=0000000000000000000000000000000000000000
+  assert_contains "$OUT" "has_provision=false"
+}

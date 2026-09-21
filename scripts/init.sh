@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# =============================================================================
+# xsel-deploy-mutualise — init.sh
+#
+# Initialise le CI/CD d'un projet en UNE commande, à lancer à la racine du dépôt :
+#   bash <(curl -fsSL https://raw.githubusercontent.com/ouangni-wangny/xsel-deploy-mutualise/v1/scripts/init.sh) \
+#        --user monutilisateur --host serveur.example.com --port 22 --generate-key --set-secrets
+#
+# Ce qu'il fait : détecte les apps (Laravel / Next.js), écrit `.xsel-deploy.yml` et
+# `.github/workflows/cicd.yml` (sans écraser l'existant), génère au besoin une clé
+# SSH dédiée, et pose les 4 secrets GitHub avec `gh`. Il ne pose AUCUNE question
+# (100 % pilotable par options) et n'écrit jamais de clé privée dans le dépôt.
+#
+# Options :
+#   --dir DIR          racine du projet (défaut .)
+#   --repo OWNER/NOM   dépôt GitHub des secrets (défaut : `gh repo view`)
+#   --user U --host H --port P    cible SSH (secrets DEPLOY_SSH_USER/HOST/PORT)
+#   --key-file FICHIER clé privée existante à utiliser
+#   --generate-key     génère une clé ed25519 dédiée (dans $XSEL_KEY_DIR, défaut ~/.ssh)
+#   --set-secrets      pose réellement les secrets (exige --user --host --port et une clé)
+#   --kit-ref REF      référence du kit dans cicd.yml (défaut v1)
+#   --force            écrase cicd.yml / .xsel-deploy.yml existants
+#   --dry-run          n'écrit et ne pose RIEN : affiche seulement ce qui serait fait
+# =============================================================================
+set -uo pipefail
+
+DIR="."; REPO=""; SSH_USER=""; SSH_HOST=""; SSH_PORT=""; KEY_FILE=""
+GEN_KEY=0; SET_SECRETS=0; KIT_REF="v1"; FORCE=0; DRY=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dir) DIR="$2"; shift 2 ;;            --repo) REPO="$2"; shift 2 ;;
+    --user) SSH_USER="$2"; shift 2 ;;      --host) SSH_HOST="$2"; shift 2 ;;
+    --port) SSH_PORT="$2"; shift 2 ;;      --key-file) KEY_FILE="$2"; shift 2 ;;
+    --generate-key) GEN_KEY=1; shift ;;    --set-secrets) SET_SECRETS=1; shift ;;
+    --kit-ref) KIT_REF="$2"; shift 2 ;;    --force) FORCE=1; shift ;;
+    --dry-run) DRY=1; shift ;;
+    -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "option inconnue : $1 (voir --help)" >&2; exit 2 ;;
+  esac
+done
+
+say()  { echo "$*"; }
+step() { echo; echo "▶ $*"; }
+act()  { if [ "$DRY" -eq 1 ]; then echo "  [dry-run] $*"; else echo "  ✓ $*"; fi; }
+
+command -v jq >/dev/null || { echo "jq est requis" >&2; exit 1; }
+[ -d "$DIR" ] || { echo "dossier introuvable : $DIR" >&2; exit 1; }
+cd "$DIR" || exit 1
+
+# --- 1. Détection des apps ---------------------------------------------------
+step "Détection des applications"
+LARAVEL=(); NEXT=()
+for d in . */; do
+  d="${d%/}"
+  case "$d" in node_modules|vendor|.git|.github) continue ;; esac
+  if [ -f "$d/composer.json" ] && jq -e '(.require // {}) | has("laravel/framework")' "$d/composer.json" >/dev/null 2>&1; then LARAVEL+=("$d")
+  elif [ -f "$d/package.json" ] && jq -e '((.dependencies // {}) + (.devDependencies // {})) | has("next")' "$d/package.json" >/dev/null 2>&1; then NEXT+=("$d"); fi
+done
+APPS=(${LARAVEL[@]+"${LARAVEL[@]}"} ${NEXT[@]+"${NEXT[@]}"})   # API avant frontend
+[ "${#APPS[@]}" -gt 0 ] || { echo "aucune app détectée (ni laravel/framework, ni next)" >&2; exit 1; }
+for a in "${APPS[@]}"; do say "  - $a"; done
+
+# --- 2. Manifeste et workflow ------------------------------------------------
+U="${SSH_USER:-UTILISATEUR}"
+write_file() { # write_file <chemin> ; contenu sur stdin
+  if [ -e "$1" ] && [ "$FORCE" -eq 0 ]; then cat >/dev/null; act "$1 existe déjà : conservé (--force pour écraser)"; return; fi
+  if [ "$DRY" -eq 1 ]; then cat >/dev/null; act "écrirait $1"; else mkdir -p "$(dirname "$1")"; cat > "$1"; act "$1 écrit"; fi
+}
+
+step "Manifeste .xsel-deploy.yml"
+{
+  echo "version: 1"; echo
+  echo "apps:"
+  for a in "${APPS[@]}"; do
+    name="$a"; [ "$a" = "." ] && name="app"
+    echo "  ${name}:"
+    [ "$a" = "." ] && echo "    path: ." || echo "    path: ${a}"
+    echo "    deploy_path: /home/${U}/${name}                 # À ADAPTER : dossier sur le serveur"
+    echo "    health_check_url: https://EXEMPLE.COM              # À ADAPTER : URL publique (Laravel : …/up)"
+    case " ${LARAVEL[*]-} " in *" $a "*) echo "    # database: mysql                                   # CI : conteneur MySQL pour les tests"
+                                       echo "    # provision: { database: nom }                      # création de la base + .env (action: provision)" ;; esac
+    echo
+  done
+} | write_file .xsel-deploy.yml
+
+step "Workflow .github/workflows/cicd.yml"
+cat <<Y | write_file .github/workflows/cicd.yml
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Que faire ?"
+        type: choice
+        options: [deploy, doctor, provision]
+        default: deploy
+      apps:
+        description: "Apps concernées (noms séparés par des virgules ; vide = toutes)"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  pipeline:
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/pipeline.yml@${KIT_REF}
+    secrets: inherit
+Y
+
+# --- 3. Clé SSH ---------------------------------------------------------------
+KEY_PATH="$KEY_FILE"
+if [ "$GEN_KEY" -eq 1 ] && [ -z "$KEY_FILE" ]; then
+  step "Clé SSH dédiée"
+  KD="${XSEL_KEY_DIR:-$HOME/.ssh}"; name="xsel-deploy-$(basename "$(pwd)")"
+  if [ "$DRY" -eq 1 ]; then act "générerait ${KD}/${name} (ed25519, sans passphrase)"; KEY_PATH="${KD}/${name}"
+  else
+    mkdir -p "$KD"; chmod 700 "$KD"
+    [ -e "${KD}/${name}" ] && { echo "  ${KD}/${name} existe déjà : réutilisée"; } \
+      || ssh-keygen -q -t ed25519 -N "" -C "github-actions-deploy@$(basename "$(pwd)")" -f "${KD}/${name}"
+    KEY_PATH="${KD}/${name}"; act "clé privée : ${KEY_PATH} (hors dépôt, à ne jamais commiter)"
+    say "  Clé PUBLIQUE à autoriser dans cPanel (SSH Access → Manage SSH Keys → Import Key → Authorize) :"
+    sed 's/^/    /' "${KEY_PATH}.pub"
+  fi
+fi
+
+# --- 4. Secrets GitHub --------------------------------------------------------
+if [ "$SET_SECRETS" -eq 1 ]; then
+  step "Secrets GitHub"
+  [ -n "$SSH_USER" ] && [ -n "$SSH_HOST" ] && [ -n "$SSH_PORT" ] || { echo "--set-secrets exige --user, --host et --port" >&2; exit 1; }
+  [ -n "$KEY_PATH" ] || { echo "--set-secrets exige --key-file ou --generate-key" >&2; exit 1; }
+  [ "$DRY" -eq 1 ] || [ -f "$KEY_PATH" ] || { echo "clé introuvable : $KEY_PATH" >&2; exit 1; }
+  if [ -z "$REPO" ]; then REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)"; fi
+  [ -n "$REPO" ] || { echo "dépôt introuvable : passez --repo OWNER/NOM (ou connectez gh)" >&2; exit 1; }
+  set_secret() { # set_secret <NOM> <valeur|@fichier>
+    if [ "$DRY" -eq 1 ]; then act "poserait le secret $1 sur $REPO"; return; fi
+    if [ "${2#@}" != "$2" ]; then gh secret set "$1" --repo "$REPO" < "${2#@}" >/dev/null && act "secret $1 posé"
+    else printf '%s' "$2" | gh secret set "$1" --repo "$REPO" >/dev/null && act "secret $1 posé"; fi
+  }
+  set_secret DEPLOY_SSH_HOST "$SSH_HOST"; set_secret DEPLOY_SSH_PORT "$SSH_PORT"
+  set_secret DEPLOY_SSH_USER "$SSH_USER"; set_secret DEPLOY_SSH_PRIVATE_KEY "@${KEY_PATH}"
+fi
+
+# --- 5. Suite -------------------------------------------------------------------
+step "Prochaines étapes"
+cat <<N
+  1. Adaptez .xsel-deploy.yml (deploy_path, health_check_url).
+  2. Autorisez la clé publique dans cPanel si ce n'est pas fait, et vérifiez les 4 secrets
+     (DEPLOY_SSH_HOST / PORT / USER / PRIVATE_KEY).
+  3. Commitez .xsel-deploy.yml et .github/workflows/cicd.yml, poussez.
+  4. Actions → CI/CD → Run workflow → action: doctor   (diagnostic du serveur, ne déploie rien)
+  5. Nouvelle app ? action: provision (base + .env), puis un push sur main déploie.
+N
+exit 0

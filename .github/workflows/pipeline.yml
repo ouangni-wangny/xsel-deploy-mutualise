@@ -5,7 +5,8 @@ name: Pipeline (CI + CD)
 # l'événement et les fichiers modifiés, quoi lancer :
 #   push / pull_request     -> CI des apps modifiées
 #   push (branche de déploiement) -> puis déploiement (une app à la fois)
-#   workflow_dispatch       -> déploiement manuel ou diagnostic (action: doctor)
+#   workflow_dispatch       -> déploiement manuel, diagnostic (action: doctor) ou
+#                              préparation d'une app fraîche (action: provision)
 #   schedule                -> monitoring des URLs
 # Secrets attendus du projet (secrets: inherit) : DEPLOY_SSH_HOST, DEPLOY_SSH_PORT,
 # DEPLOY_SSH_USER, DEPLOY_SSH_PRIVATE_KEY. Voir templates/cicd-caller.example.yml.
@@ -27,6 +28,12 @@ on:
         required: false
       DEPLOY_SSH_PRIVATE_KEY:
         required: false
+      NOTIFY_WEBHOOK_URL:
+        required: false
+      TELEGRAM_BOT_TOKEN:
+        required: false
+      TELEGRAM_CHAT_ID:
+        required: false
 
 permissions:
   contents: read
@@ -40,10 +47,12 @@ jobs:
       ci_apps: ${{ steps.plan.outputs.ci_apps }}
       deploy_apps: ${{ steps.plan.outputs.deploy_apps }}
       doctor_apps: ${{ steps.plan.outputs.doctor_apps }}
+      provision_apps: ${{ steps.plan.outputs.provision_apps }}
       monitor_urls: ${{ steps.plan.outputs.monitor_urls }}
       has_ci: ${{ steps.plan.outputs.has_ci }}
       has_deploy: ${{ steps.plan.outputs.has_deploy }}
       has_doctor: ${{ steps.plan.outputs.has_doctor }}
+      has_provision: ${{ steps.plan.outputs.has_provision }}
       has_monitor: ${{ steps.plan.outputs.has_monitor }}
       environment: ${{ steps.plan.outputs.environment }}
     steps:
@@ -73,6 +82,20 @@ jobs:
           ACTION: ${{ github.event.inputs.action }}
           ONLY_APPS: ${{ github.event.inputs.apps }}
         run: bash deploy-kit/scripts/plan.sh
+
+      # Bonnes pratiques du projet : avertissements seulement (jamais bloquant).
+      # Pas à chaque passage du cron de monitoring : ce serait du bruit.
+      - name: Politiques (bonnes pratiques du projet)
+        if: github.event_name != 'schedule'
+        env:
+          REPO_DIR: app
+          MANIFEST: ${{ inputs.manifest }}
+          GH_TOKEN: ${{ github.token }}
+          KIT_REPO: ${{ job.workflow_repository }}
+        run: |
+          KIT_LATEST="$(gh api "repos/${KIT_REPO}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+          export KIT_LATEST
+          bash deploy-kit/scripts/policy.sh
 
   ci:
     name: CI ${{ matrix.app.name }}
@@ -115,7 +138,9 @@ jobs:
     # Déploie si la CI a réussi — ou n'a pas eu lieu (ci: none / aucune app à tester).
     if: ${{ !cancelled() && needs.plan.outputs.has_deploy == 'true' && (needs.ci.result == 'success' || needs.ci.result == 'skipped') }}
     runs-on: ubuntu-latest
-    environment: ${{ needs.plan.outputs.environment }}
+    environment:
+      name: ${{ needs.plan.outputs.environment }}
+      url: ${{ matrix.app.health_check_url }}
     timeout-minutes: 20
     # Une app à la fois, dans l'ordre du manifeste (ex. API avant frontend) : un
     # échec arrête les suivantes, et on n'ouvre jamais deux sessions SSH en
@@ -204,6 +229,46 @@ jobs:
           ssh_user: ${{ secrets.DEPLOY_SSH_USER }}
           ssh_private_key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
 
+  provision:
+    name: Provisionner ${{ matrix.app.name }}
+    needs: plan
+    if: needs.plan.outputs.has_provision == 'true'
+    runs-on: ubuntu-latest
+    # Crée une base et un .env sur le serveur de production : mêmes protections
+    # (approbation) que le déploiement.
+    environment: ${{ needs.plan.outputs.environment }}
+    timeout-minutes: 10
+    strategy:
+      max-parallel: 1
+      fail-fast: true
+      matrix:
+        app: ${{ fromJSON(needs.plan.outputs.provision_apps) }}
+    steps:
+      - name: Checkout du projet appelant
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: app
+
+      - name: Checkout xsel-deploy-mutualise (même version que ce workflow)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: deploy-kit
+
+      - name: Provisionner
+        uses: ./deploy-kit/.github/actions/provision-app
+        with:
+          stack: ${{ matrix.app.stack }}
+          app_path: ${{ matrix.app.path }}
+          deploy_path: ${{ matrix.app.deploy_path }}
+          health_check_url: ${{ matrix.app.health_check_url }}
+          database: ${{ matrix.app.provision_database }}
+          ssh_host: ${{ secrets.DEPLOY_SSH_HOST }}
+          ssh_port: ${{ secrets.DEPLOY_SSH_PORT }}
+          ssh_user: ${{ secrets.DEPLOY_SSH_USER }}
+          ssh_private_key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+
   monitor:
     name: Monitoring
     needs: plan
@@ -211,6 +276,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Checkout xsel-deploy-mutualise (même version que ce workflow)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: deploy-kit
+
+      # Disponibilité (HTTP) puis validité du certificat TLS : < 21 jours =
+      # avertissement, < 7 jours = échec (un certificat expiré coupe le site).
       - name: Vérifier chaque URL
         env:
           URLS: ${{ needs.plan.outputs.monitor_urls }}
@@ -223,5 +297,46 @@ jobs:
               echo "::error::$url ne répond pas (ou erreur HTTP)"
               FAIL=1
             fi
+            case "$url" in https://*)
+              host="${url#https://}"; host="${host%%[/:?]*}"
+              days="$(bash deploy-kit/scripts/check-cert.sh "$host" || true)"
+              if [ -z "$days" ]; then echo "::warning::certificat de $host illisible"
+              elif [ "$days" -lt 7 ]; then echo "::error::certificat de $host : expire dans $days jour(s)"; FAIL=1
+              elif [ "$days" -lt 21 ]; then echo "::warning::certificat de $host : expire dans $days jours"
+              else echo "🔒 $host : certificat valide $days jours"; fi ;;
+            esac
           done
           exit "$FAIL"
+
+  notify:
+    name: Notifier l'échec
+    needs: [plan, ci, deploy, provision, doctor, monitor]
+    # Uniquement si un job a échoué, hors pull_request (l'échec y est déjà visible).
+    if: ${{ always() && github.event_name != 'pull_request' && contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout xsel-deploy-mutualise (même version que ce workflow)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: deploy-kit
+
+      - name: Envoyer la notification (canaux configurés uniquement)
+        env:
+          NOTIFY_WEBHOOK_URL: ${{ secrets.NOTIFY_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NEEDS: ${{ toJSON(needs) }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          BRANCH: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          FAILED="$(jq -r 'to_entries | map(select(.value.result == "failure") | .key) | join(", ")' <<<"$NEEDS")"
+          export NOTIFY_TITLE="❌ ${REPO} : CI/CD en échec (${FAILED})"
+          export NOTIFY_BODY="${EVENT} sur ${BRANCH} par ${ACTOR} — commit ${SHA:0:7}"$'\n'"${RUN_URL}"
+          bash deploy-kit/scripts/notify.sh

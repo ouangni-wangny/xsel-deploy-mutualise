@@ -18,6 +18,7 @@ apps:
     # lint: true                          # Pint (Laravel) / npm run lint (Next) en CI
     # ci: none                            # désactiver la CI standard de cette app
     # deploy: false                       # tester sans déployer
+    # provision: { database: monapp }     # action: provision → crée la base MySQL + l'utilisateur et un .env de production complet
     # php_version: "8.4"                  # défaut : PHP cPanel du domaine, sinon le plus bas >= composer.json
     # php_bin: /opt/alt/php84/usr/bin/php # défaut : auto
     # php_extensions: [intl, gd]          # en plus de celles de composer.lock
