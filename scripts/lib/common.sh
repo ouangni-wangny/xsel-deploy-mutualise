@@ -74,9 +74,14 @@ web_php_evidence() {
   curl -sSI --max-time 10 "$url" 2>/dev/null | grep -iE '^(HTTP|server|x-powered-by|x-litespeed)' | tr -d '\r' | sed 's/^/  /' || true
   if [ -n "${DEPLOY_PATH:-}" ]; then
     echo ".htaccess : directives PHP :"
+    # Le dossier parent compte aussi : un sous-domaine sous public_html/ hérite
+    # du .htaccess du domaine principal (handler PHP d'un autre domaine).
     grep -nHiE 'AddHandler|SetHandler|AddType.*php|php_value|suPHP|FcgidWrapper|alt-php|ea-php' \
-      "${DEPLOY_PATH}/.htaccess" "${DEPLOY_PATH}/public/.htaccess" 2>/dev/null | cut -c1-200 | head -n 8 | sed 's/^/  /' || true
+      "${DEPLOY_PATH}/.htaccess" "${DEPLOY_PATH}/public/.htaccess" \
+      "$(dirname "${DEPLOY_PATH}")/.htaccess" "$(dirname "$(dirname "${DEPLOY_PATH}")")/.htaccess" \
+      2>/dev/null | cut -c1-200 | head -n 8 | sed 's/^/  /' || true
     [ -f "${DEPLOY_PATH}/.htaccess" ] || echo "  (pas de ${DEPLOY_PATH}/.htaccess)"
+    web_php_probe "$url"
   fi
   if command -v selectorctl >/dev/null 2>&1; then
     echo "PHP Selector (selectorctl --user-summary) :"
@@ -149,4 +154,21 @@ backup_database() {
     rm -f "$file"
   fi
   rm -f "$err"
+}
+
+# Sonde : la version de PHP réellement exécutée par le serveur web. Composer
+# masque « You are running X » dans sa page d'erreur web, et le PHP CLI peut
+# différer du PHP web. Crée un fichier public/ au nom aléatoire qui n'affiche
+# que PHP_VERSION et le SAPI, l'appelle depuis le serveur, puis le supprime
+# aussitôt (uniquement appelé sur healthcheck KO).
+web_php_probe() {
+  local url="$1" base name file out
+  base="${url%%://*}://$(printf '%s' "${url#*://}" | cut -d/ -f1)"
+  name="kit-probe-$(date +%s)-${RANDOM}${RANDOM}.php"
+  file="${DEPLOY_PATH}/public/${name}"
+  [ -d "${DEPLOY_PATH}/public" ] || return 0
+  printf '<?php echo PHP_VERSION, " ", PHP_SAPI;' > "$file" 2>/dev/null || return 0
+  out="$(curl -sS --max-time 10 "${base}/${name}" 2>&1 | head -c 120 | tr -d '\r' || true)"
+  rm -f "$file"
+  echo "PHP réellement exécuté par le serveur web : ${out:-aucune réponse}"
 }
