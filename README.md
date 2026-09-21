@@ -41,7 +41,9 @@ côté serveur, healthcheck.
 | `node_version` | non | `20` | Version Node utilisée pour le build CI |
 | `build_frontend_assets` | non | `true` | Stack `laravel` uniquement : lance `npm run build` (Vite) avant déploiement |
 | `php_bin` | non | `php` | Stack `laravel` : chemin du binaire PHP **côté serveur** (voir [CloudLinux](#cloudlinux--cagefs)) |
-| `composer_bin` | non | `composer` | Stack `laravel` : chemin du binaire composer côté serveur |
+| `composer_on_server` | non | `false` | Stack `laravel` : `false` = dépendances construites par le CI et livrées (recommandé) ; `true` = `composer install` sur le serveur |
+| `php_extensions` | non | *(vide)* | Stack `laravel` : extensions PHP supplémentaires à exiger/activer (`intl,gd`), en plus de celles de `composer.lock` |
+| `composer_bin` | non | `composer` | Stack `laravel`, seulement si `composer_on_server: true` : chemin du binaire composer côté serveur |
 | `build_env` | non | `""` | Variables exposées pendant le build, une par ligne `KEY=VALUE`. **Obligatoire** pour tout `NEXT_PUBLIC_*` (figé au build, jamais relu au runtime) |
 | `protect_paths` | non | `""` | Chemins relatifs à `deploy_path` à protéger de `rsync --delete`, un par ligne — voir [Organiser un projet](#organiser-un-projet-monorepo-ou-multi-repo) |
 
@@ -305,7 +307,12 @@ Conçu par ADR, validé en conditions réelles sur PECI (plusieurs incidents
 rencontrés et corrigés en direct — voir les ADR et l'historique des
 commits). Versions taguées :
 
-- **`v1.0.4`** (courant) — hébergeurs sans composer : le workflow envoie
+- **`v1.1.0`** (courant) — *build once* : `composer install` sur le runner,
+  `vendor/` livré avec le code (nouvelle entrée `composer_on_server`, défaut
+  `false`) ; extensions PHP déduites de `composer.lock`, vérifiées et
+  activées via `selectorctl` avant le transfert (`php_extensions` pour en
+  ajouter). Voir [ADR-0007](docs/adr/0007-build-once-and-php-extensions.md).
+- **`v1.0.4`** — hébergeurs sans composer : le workflow envoie
   le `composer.phar` du runner, exécuté avec `php_bin` (le préflight ne
   bloque plus sur `composer_bin` introuvable).
 - **`v1.0.3`** — le préflight liste les binaires php/composer
