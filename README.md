@@ -55,6 +55,39 @@ Stack, versions de PHP/Node, binaire PHP du serveur et extensions PHP sont
 Le manifeste, ou tout fichier sous `.github/`, modifié → toutes les apps sont
 concernées. Détails : [ADR-0010](docs/adr/0010-pipeline-manifest-composite-actions.md).
 
+### Nouveau projet : une commande
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/ouangni-wangny/xsel-deploy-mutualise/v1/scripts/init.sh) \
+     --user monutilisateur --host serveur.example.com --port 22 --generate-key --set-secrets
+```
+[`init.sh`](scripts/init.sh) détecte les apps (Laravel / Next.js), écrit
+`.xsel-deploy.yml` et `cicd.yml` (sans rien écraser), génère une clé SSH
+**dédiée** (hors du dépôt) dont il affiche la clé publique à autoriser dans
+cPanel, et pose les 4 secrets. Il ne pose aucune question ; `--dry-run` montre
+ce qui serait fait sans rien écrire.
+
+Ensuite, depuis l'onglet Actions (*CI/CD → Run workflow*) :
+1. **`action: doctor`** : diagnostic du serveur (ne déploie rien).
+2. **`action: provision`** (app Laravel fraîche) : crée la base MySQL et son
+   utilisateur via cPanel (`uapi`) et un `.env` de production complet
+   (`APP_KEY` générée, `APP_DEBUG=false`, mot de passe généré, jamais affiché).
+   Idempotent : **ne touche à rien si `.env` existe déjà**. À activer par app :
+   `provision: { database: nom }` dans le manifeste.
+3. Un push sur `main` déploie.
+
+### Visibilité et garde-fous (automatiques)
+- **Résumé de déploiement** dans chaque run, et lien vers le site dans
+  l'historique des déploiements GitHub.
+- **Monitoring** : disponibilité HTTP **et** expiration du certificat TLS
+  (avertissement < 21 jours, échec < 7 jours).
+- **Notifications d'échec** (optionnelles) via secrets : `NOTIFY_WEBHOOK_URL`
+  (Slack / Discord) et/ou `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`. Sans secret,
+  rien n'est envoyé. Jamais sur `pull_request`.
+- **Politiques** (avertissements) : `.env` versionné dans git, `health_check_url`
+  en `http://`, kit référencé par une branche ou épinglé sur une version en retard.
+  `deploy_path` non absolu ou contenant `..` : erreur bloquante.
+
 `@v1` est un tag **flottant** (dernière version 1.x.y dont les tests ont
 passé, déplacé par [`release.yml`](.github/workflows/release.yml)) : les
 projets reçoivent les correctifs sans rien modifier. Pour figer, `@v1.4.0`
@@ -244,6 +277,9 @@ clé en argument — évite qu'elle traîne dans un historique de shell.)
 
 ### 5. Créer le dossier de base sur le serveur (une fois par app)
 
+> Depuis `v1.5.0`, `action: provision` fait tout ceci sans SSH manuel (voir
+> [Nouveau projet](#nouveau-projet--une-commande)). Méthode manuelle, toujours valable :
+
 Copier [`scripts/bootstrap-app.sh`](scripts/bootstrap-app.sh) sur le
 serveur, puis :
 ```bash
@@ -362,7 +398,13 @@ Conçu par ADR, validé en conditions réelles sur PECI (plusieurs incidents
 rencontrés et corrigés en direct — voir les ADR et l'historique des
 commits). Versions taguées :
 
-- **`v1.4.0`** (courant) — point d'entrée unique **`pipeline.yml`** +
+- **`v1.5.0`** (courant) — action **`provision`** (base MySQL + utilisateur +
+  `.env` de production via `uapi`, idempotent), commande **`init.sh`**,
+  monitoring du certificat TLS, notifications d'échec (webhook / Telegram),
+  résumé de déploiement, politiques (`.env` versionné, http, kit en retard),
+  validation du `deploy_path`. Voir
+  [ADR-0011](docs/adr/0011-provisioning-init-visibility.md).
+- **`v1.4.0`** — point d'entrée unique **`pipeline.yml`** +
   manifeste `.xsel-deploy.yml` (CI standard, déploiement séquentiel des apps
   modifiées, diagnostic, monitoring), logique déplacée dans des actions
   composites, tag flottant **`v1`** géré par `release.yml`. Voir
