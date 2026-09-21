@@ -1,0 +1,153 @@
+name: CI standard d'une application
+description: >
+  Tests d'UNE application selon sa stack : Laravel (composer, .env de test,
+  MySQL optionnel, Pint optionnel, `artisan test`) ou Next.js (npm ci, lint
+  optionnel, tests s'ils existent, `npm run build`). Prérequis du job appelant :
+  projet dans `app/`, kit dans `deploy-kit/` (checkout de job.workflow_sha).
+
+inputs:
+  stack:
+    description: auto | laravel | nextjs-passenger
+    required: false
+    default: auto
+  app_path:
+    description: Sous-dossier du projet contenant l'app
+    required: false
+    default: "."
+  php_version:
+    description: Version PHP (vide = php_version déduite de composer.json)
+    required: false
+    default: ""
+  node_version:
+    description: Version de Node (vide = détectée)
+    required: false
+    default: ""
+  php_extensions:
+    description: Extensions PHP supplémentaires (virgules)
+    required: false
+    default: ""
+  database:
+    description: "laravel : none | mysql (conteneur MySQL 8 pour les tests)"
+    required: false
+    default: none
+  lint:
+    description: "true : Pint (laravel) / npm run lint (next)"
+    required: false
+    default: "false"
+  build_env:
+    description: Variables d'environnement du build, une par ligne KEY=VALUE
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Détecter stack, PHP, extensions, Node
+      id: detect
+      shell: bash
+      env:
+        STACK_INPUT: ${{ inputs.stack }}
+        EXTRA_EXTS: ${{ inputs.php_extensions }}
+        NODE_INPUT: ${{ inputs.node_version }}
+        APP_PATH: ${{ inputs.app_path }}
+        BUILD_ENV: ${{ inputs.build_env }}
+      run: |
+        OUT="$(bash deploy-kit/scripts/detect-app.sh "app/${APP_PATH}")" || { echo "$OUT"; exit 1; }
+        echo "$OUT"
+        echo "$OUT" | grep -E '^(stack|min_php|required_exts|node_version)=' >> "$GITHUB_OUTPUT"
+        # Variables de build (NEXT_PUBLIC_*…) visibles des étapes suivantes.
+        [ -n "$BUILD_ENV" ] && printf '%s\n' "$BUILD_ENV" >> "$GITHUB_ENV"
+        exit 0
+
+    # ---------------------------------------------------------------- Laravel
+    - name: Démarrer MySQL (tests)
+      if: steps.detect.outputs.stack == 'laravel' && inputs.database == 'mysql'
+      shell: bash
+      run: |
+        docker run -d --name ci-mysql -e MYSQL_ROOT_PASSWORD=password -e MYSQL_DATABASE=ci -p 3306:3306 mysql:8.0 >/dev/null
+        for _ in $(seq 1 40); do
+          docker exec ci-mysql mysqladmin ping -h 127.0.0.1 -uroot -ppassword --silent >/dev/null 2>&1 && exit 0
+          sleep 2
+        done
+        echo "::error::MySQL n'a pas démarré à temps"; docker logs ci-mysql | tail -20; exit 1
+
+    - name: Setup PHP
+      if: steps.detect.outputs.stack == 'laravel'
+      uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+      with:
+        php-version: ${{ inputs.php_version || steps.detect.outputs.min_php || '8.3' }}
+        extensions: ${{ steps.detect.outputs.required_exts && format('{0},pdo_mysql', steps.detect.outputs.required_exts) || 'pdo_mysql' }}
+        tools: composer:v2
+        coverage: none
+
+    - name: Installer les dépendances PHP
+      if: steps.detect.outputs.stack == 'laravel'
+      shell: bash
+      working-directory: app/${{ inputs.app_path }}
+      run: composer install --prefer-dist --no-progress --no-interaction --no-scripts
+
+    - name: Préparer l'environnement de test Laravel
+      if: steps.detect.outputs.stack == 'laravel'
+      shell: bash
+      working-directory: app/${{ inputs.app_path }}
+      env:
+        DATABASE: ${{ inputs.database }}
+      run: |
+        [ -f .env ] || cp .env.example .env
+        set_env() { if grep -q "^$1=" .env; then sed -i.bak "s#^$1=.*#$1=$2#" .env && rm -f .env.bak; else echo "$1=$2" >> .env; fi; }
+        if [ "$DATABASE" = "mysql" ]; then
+          set_env DB_CONNECTION mysql; set_env DB_HOST 127.0.0.1; set_env DB_PORT 3306
+          set_env DB_DATABASE ci; set_env DB_USERNAME root; set_env DB_PASSWORD password
+        fi
+        php artisan key:generate --ansi
+        php artisan package:discover --ansi
+
+    - name: Pint (style)
+      if: steps.detect.outputs.stack == 'laravel' && inputs.lint == 'true'
+      shell: bash
+      working-directory: app/${{ inputs.app_path }}
+      run: ./vendor/bin/pint --test
+
+    - name: Tests Laravel
+      if: steps.detect.outputs.stack == 'laravel'
+      shell: bash
+      working-directory: app/${{ inputs.app_path }}
+      run: php artisan test
+
+    # ---------------------------------------------------------------- Next.js
+    - name: Setup Node
+      if: steps.detect.outputs.stack == 'nextjs-passenger'
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: ${{ steps.detect.outputs.node_version }}
+        cache: 'npm'
+        cache-dependency-path: app/${{ inputs.app_path }}/package-lock.json
+
+    - name: Installer les dépendances
+      if: steps.detect.outputs.stack == 'nextjs-passenger'
+      shell: bash
+      working-directory: app/${{ inputs.app_path }}
+      run: npm ci
+
+    - name: Lint
+      if: steps.detect.outputs.stack == 'nextjs-passenger' && inputs.lint == 'true'
+      shell: bash
+      working-directory: app/${{ inputs.app_path }}
+      run: npm run lint
+
+    - name: Tests (si le projet en définit)
+      if: steps.detect.outputs.stack == 'nextjs-passenger'
+      shell: bash
+      working-directory: app/${{ inputs.app_path }}
+      run: |
+        # Ignore le script par défaut de `npm init` (« no test specified »).
+        T="$(jq -r '.scripts.test // ""' package.json)"
+        case "$T" in ""|*"no test specified"*) echo "aucun test défini — ignoré" ;; *) npm test ;; esac
+
+    # `next build` type-checke déjà tout le projet (y compris les types de routes
+    # générés) : un `tsc --noEmit` séparé avant le build échouerait sur ceux-ci.
+    - name: Build
+      if: steps.detect.outputs.stack == 'nextjs-passenger'
+      shell: bash
+      working-directory: app/${{ inputs.app_path }}
+      run: npm run build

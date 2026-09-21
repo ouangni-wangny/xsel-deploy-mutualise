@@ -1,0 +1,227 @@
+name: Pipeline (CI + CD)
+
+# Point d'entrée UNIQUE d'un projet (ADR-0010). Le projet ne porte qu'un petit
+# workflow d'appel + le manifeste .xsel-deploy.yml ; le kit décide, selon
+# l'événement et les fichiers modifiés, quoi lancer :
+#   push / pull_request     -> CI des apps modifiées
+#   push (branche de déploiement) -> puis déploiement (une app à la fois)
+#   workflow_dispatch       -> déploiement manuel ou diagnostic (action: doctor)
+#   schedule                -> monitoring des URLs
+# Secrets attendus du projet (secrets: inherit) : DEPLOY_SSH_HOST, DEPLOY_SSH_PORT,
+# DEPLOY_SSH_USER, DEPLOY_SSH_PRIVATE_KEY. Voir templates/cicd-caller.example.yml.
+
+on:
+  workflow_call:
+    inputs:
+      manifest:
+        description: "Chemin du manifeste dans le projet appelant"
+        required: false
+        type: string
+        default: ".xsel-deploy.yml"
+    secrets:
+      DEPLOY_SSH_HOST:
+        required: false
+      DEPLOY_SSH_PORT:
+        required: false
+      DEPLOY_SSH_USER:
+        required: false
+      DEPLOY_SSH_PRIVATE_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Planifier
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ci_apps: ${{ steps.plan.outputs.ci_apps }}
+      deploy_apps: ${{ steps.plan.outputs.deploy_apps }}
+      doctor_apps: ${{ steps.plan.outputs.doctor_apps }}
+      monitor_urls: ${{ steps.plan.outputs.monitor_urls }}
+      has_ci: ${{ steps.plan.outputs.has_ci }}
+      has_deploy: ${{ steps.plan.outputs.has_deploy }}
+      has_doctor: ${{ steps.plan.outputs.has_doctor }}
+      has_monitor: ${{ steps.plan.outputs.has_monitor }}
+      environment: ${{ steps.plan.outputs.environment }}
+    steps:
+      - name: Checkout du projet appelant (historique complet pour le diff)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: app
+          fetch-depth: 0
+
+      - name: Checkout xsel-deploy-mutualise (même version que ce workflow)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: deploy-kit
+
+      - name: Lire le manifeste et décider quoi lancer
+        id: plan
+        env:
+          REPO_DIR: app
+          MANIFEST: ${{ inputs.manifest }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          ACTION: ${{ github.event.inputs.action }}
+          ONLY_APPS: ${{ github.event.inputs.apps }}
+        run: bash deploy-kit/scripts/plan.sh
+
+  ci:
+    name: CI ${{ matrix.app.name }}
+    needs: plan
+    if: needs.plan.outputs.has_ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.plan.outputs.ci_apps) }}
+    steps:
+      - name: Checkout du projet appelant
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: app
+
+      - name: Checkout xsel-deploy-mutualise (même version que ce workflow)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: deploy-kit
+
+      - name: CI
+        uses: ./deploy-kit/.github/actions/ci-app
+        with:
+          stack: ${{ matrix.app.stack }}
+          app_path: ${{ matrix.app.path }}
+          php_version: ${{ matrix.app.php_version }}
+          node_version: ${{ matrix.app.node_version }}
+          php_extensions: ${{ matrix.app.php_extensions }}
+          database: ${{ matrix.app.database }}
+          lint: ${{ matrix.app.lint }}
+          build_env: ${{ matrix.app.build_env }}
+
+  deploy:
+    name: Déployer ${{ matrix.app.name }}
+    needs: [plan, ci]
+    # Déploie si la CI a réussi — ou n'a pas eu lieu (ci: none / aucune app à tester).
+    if: ${{ !cancelled() && needs.plan.outputs.has_deploy == 'true' && (needs.ci.result == 'success' || needs.ci.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    environment: ${{ needs.plan.outputs.environment }}
+    timeout-minutes: 20
+    # Une app à la fois, dans l'ordre du manifeste (ex. API avant frontend) : un
+    # échec arrête les suivantes, et on n'ouvre jamais deux sessions SSH en
+    # parallèle vers le même hébergeur (limites de connexions, ADR-0006).
+    strategy:
+      max-parallel: 1
+      fail-fast: true
+      matrix:
+        app: ${{ fromJSON(needs.plan.outputs.deploy_apps) }}
+    # Deux déploiements vers le même deploy_path s'attendent au lieu de s'annuler
+    # (ne jamais couper un rsync en plein milieu).
+    concurrency:
+      group: deploy-${{ matrix.app.deploy_path }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout du projet appelant
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: app
+
+      - name: Checkout xsel-deploy-mutualise (même version que ce workflow)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: deploy-kit
+
+      - name: Déployer
+        uses: ./deploy-kit/.github/actions/deploy-app
+        with:
+          stack: ${{ matrix.app.stack }}
+          app_path: ${{ matrix.app.path }}
+          deploy_path: ${{ matrix.app.deploy_path }}
+          health_check_url: ${{ matrix.app.health_check_url }}
+          php_version: ${{ matrix.app.php_version }}
+          php_bin: ${{ matrix.app.php_bin }}
+          node_version: ${{ matrix.app.node_version }}
+          build_frontend_assets: ${{ matrix.app.build_frontend_assets }}
+          composer_on_server: ${{ matrix.app.composer_on_server }}
+          composer_bin: ${{ matrix.app.composer_bin }}
+          php_extensions: ${{ matrix.app.php_extensions }}
+          manage_web_php: ${{ matrix.app.manage_web_php }}
+          build_env: ${{ matrix.app.build_env }}
+          protect_paths: ${{ matrix.app.protect_paths }}
+          ssh_host: ${{ secrets.DEPLOY_SSH_HOST }}
+          ssh_port: ${{ secrets.DEPLOY_SSH_PORT }}
+          ssh_user: ${{ secrets.DEPLOY_SSH_USER }}
+          ssh_private_key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+
+  doctor:
+    name: Diagnostic ${{ matrix.app.name }}
+    needs: plan
+    if: needs.plan.outputs.has_doctor == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.plan.outputs.doctor_apps) }}
+    steps:
+      - name: Checkout du projet appelant
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: app
+
+      - name: Checkout xsel-deploy-mutualise (même version que ce workflow)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: deploy-kit
+
+      - name: Diagnostic
+        uses: ./deploy-kit/.github/actions/doctor-app
+        with:
+          stack: ${{ matrix.app.stack }}
+          app_path: ${{ matrix.app.path }}
+          deploy_path: ${{ matrix.app.deploy_path }}
+          health_check_url: ${{ matrix.app.health_check_url }}
+          php_version: ${{ matrix.app.php_version }}
+          php_bin: ${{ matrix.app.php_bin }}
+          php_extensions: ${{ matrix.app.php_extensions }}
+          ssh_host: ${{ secrets.DEPLOY_SSH_HOST }}
+          ssh_port: ${{ secrets.DEPLOY_SSH_PORT }}
+          ssh_user: ${{ secrets.DEPLOY_SSH_USER }}
+          ssh_private_key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+
+  monitor:
+    name: Monitoring
+    needs: plan
+    if: needs.plan.outputs.has_monitor == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Vérifier chaque URL
+        env:
+          URLS: ${{ needs.plan.outputs.monitor_urls }}
+        run: |
+          FAIL=0
+          for url in $(jq -r '.[]' <<<"$URLS"); do
+            if curl -fsS -o /dev/null --max-time 15 "$url"; then
+              echo "✅ $url"
+            else
+              echo "::error::$url ne répond pas (ou erreur HTTP)"
+              FAIL=1
+            fi
+          done
+          exit "$FAIL"

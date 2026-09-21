@@ -1,0 +1,147 @@
+name: Diagnostic serveur (doctor)
+description: >
+  Diagnostic en lecture seule d'UNE application : SSH, PHP installés (CLI et web),
+  extensions, composer/selectorctl/uapi, .env, APP_DEBUG, sauvegardes, site — puis
+  la configuration suggérée et un résumé de run. Ne déploie rien. Prérequis du job
+  appelant : projet dans `app/`, kit dans `deploy-kit/` (checkout de job.workflow_sha).
+
+inputs:
+  stack:
+    description: auto | laravel | nextjs-passenger
+    required: false
+    default: auto
+  app_path:
+    description: Sous-dossier du projet contenant l'app
+    required: false
+    default: "."
+  deploy_path:
+    description: Chemin absolu sur le serveur
+    required: true
+  health_check_url:
+    description: URL publique de l'app
+    required: false
+    default: ""
+  php_version:
+    description: Version PHP à tester (vide = déduite)
+    required: false
+    default: ""
+  php_bin:
+    description: Binaire PHP imposé (auto = déduit)
+    required: false
+    default: auto
+  php_extensions:
+    description: Extensions PHP supplémentaires (virgules)
+    required: false
+    default: ""
+  ssh_host:
+    description: Hôte SSH
+    required: true
+  ssh_port:
+    description: Port SSH
+    required: true
+  ssh_user:
+    description: Utilisateur SSH
+    required: true
+  ssh_private_key:
+    description: Clé privée de déploiement
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Détecter stack, PHP, extensions, Node
+      id: detect
+      shell: bash
+      env:
+        STACK_INPUT: ${{ inputs.stack }}
+        EXTRA_EXTS: ${{ inputs.php_extensions }}
+        APP_PATH: ${{ inputs.app_path }}
+      run: |
+        OUT="$(bash deploy-kit/scripts/detect-app.sh "app/${APP_PATH}")" || { echo "$OUT"; exit 1; }
+        echo "$OUT"
+        echo "$OUT" | grep -E '^(stack|min_php|required_exts|node_version)=' >> "$GITHUB_OUTPUT"
+
+    - name: Configurer SSH (connexion partagée)
+      uses: ./deploy-kit/.github/actions/ssh-setup
+      with:
+        host: ${{ inputs.ssh_host }}
+        port: ${{ inputs.ssh_port }}
+        user: ${{ inputs.ssh_user }}
+        private_key: ${{ inputs.ssh_private_key }}
+
+    - name: Domaine servi
+      if: steps.detect.outputs.stack == 'laravel'
+      shell: bash
+      env:
+        HEALTH_URL: ${{ inputs.health_check_url }}
+      run: |
+        DOMAIN="${HEALTH_URL#*://}"
+        echo "WEB_DOMAIN=${DOMAIN%%[/:?]*}" >> "$GITHUB_ENV"
+
+    - name: Résoudre le PHP du serveur
+      if: steps.detect.outputs.stack == 'laravel'
+      uses: ./deploy-kit/.github/actions/resolve-php
+      with:
+        host: ${{ inputs.ssh_host }}
+        port: ${{ inputs.ssh_port }}
+        user: ${{ inputs.ssh_user }}
+        php_bin: ${{ inputs.php_bin }}
+        php_version: ${{ inputs.php_version }}
+        min_php: ${{ steps.detect.outputs.min_php }}
+        domain: ${{ env.WEB_DOMAIN }}
+
+    - name: Rapport de diagnostic
+      shell: bash
+      env:
+        SSH_HOST: ${{ inputs.ssh_host }}
+        SSH_PORT: ${{ inputs.ssh_port }}
+        SSH_USER: ${{ inputs.ssh_user }}
+        STACK: ${{ steps.detect.outputs.stack }}
+        REQUIRED_EXTS: ${{ steps.detect.outputs.required_exts }}
+        DEPLOY_PATH: ${{ inputs.deploy_path }}
+        HEALTH_URL: ${{ inputs.health_check_url }}
+        APP_PATH: ${{ inputs.app_path }}
+      run: |
+        rssh() { ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "$@"; }
+        PHP="${RESOLVED_PHP_BIN:-}"
+        {
+          echo "## Diagnostic serveur — \`$DEPLOY_PATH\`"
+          echo
+          echo '```'
+          echo "stack détecté : $STACK"
+          if [ "$STACK" = "laravel" ]; then
+            echo "PHP retenu : ${RESOLVED_PHP_BIN} (${RESOLVED_PHP_VERSION})"
+            echo "extensions exigées (composer.lock) : ${REQUIRED_EXTS:-aucune}"
+            echo
+            echo "── Extensions PHP (diagnostic) ──"
+            rssh "PHP_BIN='$PHP' REQUIRED_EXTS='$REQUIRED_EXTS' CHECK_ONLY=1 bash -s" < deploy-kit/scripts/ensure-php-extensions.sh
+            if [ -n "${WEB_DOMAIN:-}" ]; then
+              echo
+              echo "── PHP web (diagnostic) ──"
+              rssh "PHP_BIN='$PHP' DOMAIN='$WEB_DOMAIN' CHECK_ONLY=1 bash -s" < deploy-kit/scripts/ensure-web-php.sh
+            fi
+          fi
+          cat deploy-kit/scripts/lib/common.sh deploy-kit/scripts/doctor.sh \
+            | rssh "PHP_BIN='$PHP' DEPLOY_PATH='$DEPLOY_PATH' HEALTH_URL='$HEALTH_URL' STACK='$STACK' bash -s"
+          echo '```'
+          echo
+          echo "### Configuration suggérée"
+          echo
+          echo '```yaml'
+          [ "$APP_PATH" != "." ] && echo "path: $APP_PATH"
+          echo "deploy_path: $DEPLOY_PATH"
+          [ -n "$HEALTH_URL" ] && echo "health_check_url: $HEALTH_URL"
+          [ "$STACK" = "laravel" ] && echo "# stack, php_version, php_bin, extensions : détectés automatiquement (PHP ${RESOLVED_PHP_VERSION} — ${RESOLVED_PHP_BIN})"
+          [ "$STACK" = "nextjs-passenger" ] && echo "# stack et version de Node : détectés automatiquement"
+          echo '```'
+        } 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+        exit 0
+
+    - name: Fermer la connexion SSH partagée
+      if: always()
+      shell: bash
+      env:
+        SSH_HOST: ${{ inputs.ssh_host }}
+        SSH_PORT: ${{ inputs.ssh_port }}
+        SSH_USER: ${{ inputs.ssh_user }}
+      run: ssh -O exit -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" 2>/dev/null || true

@@ -9,3 +9,6 @@ paths:
   .github/workflows/doctor.yml:
     ignore:
       - 'property "workflow_(repository|sha)" is not defined in object type'
+  .github/workflows/pipeline.yml:
+    ignore:
+      - 'property "workflow_(repository|sha)" is not defined in object type'

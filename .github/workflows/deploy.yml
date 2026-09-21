@@ -1,8 +1,9 @@
 name: Deploy (mutualisé)
 
-# Workflow réutilisable — voir ADR-0004. Ne pas dupliquer dans les projets
-# consommateurs : ils l'appellent via `uses:` (voir
-# templates/caller-workflow.example.yml). Déploiement direct, sans
+# Workflow réutilisable — déploie UNE application (voir ADR-0004, ADR-0010).
+# Couche fine : la logique vit dans l'action composite deploy-app (partagée avec
+# pipeline.yml). Pour un projet, préférer pipeline.yml + manifeste
+# .xsel-deploy.yml (un seul fichier d'appel). Déploiement direct, sans
 # releases/symlink — voir ADR-0002.
 
 on:
@@ -138,47 +139,8 @@ permissions:
   contents: read
 
 jobs:
-  # Détection (convention plutôt que configuration) : stack, PHP minimal,
-  # extensions PHP, version de Node — voir scripts/detect-app.sh et ADR-0009.
-  prepare:
-    name: Détecter l'application
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      stack: ${{ steps.detect.outputs.stack }}
-      min_php: ${{ steps.detect.outputs.min_php }}
-      required_exts: ${{ steps.detect.outputs.required_exts }}
-      node_version: ${{ steps.detect.outputs.node_version }}
-    steps:
-      - name: Checkout du projet appelant
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          path: app
-
-      # Le kit est récupéré À LA VERSION EXACTE du workflow appelé (contexte
-      # job.workflow_sha) : workflow, scripts et actions restent cohérents
-      # (lève la limite « scripts toujours sur main » de l'ADR-0004).
-      - name: Checkout xsel-deploy-mutualise (même version que ce workflow)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: deploy-kit
-
-      - name: Détecter stack, PHP, extensions, Node
-        id: detect
-        env:
-          STACK_INPUT: ${{ inputs.stack }}
-          EXTRA_EXTS: ${{ inputs.php_extensions }}
-          NODE_INPUT: ${{ inputs.node_version }}
-        run: |
-          OUT="$(bash deploy-kit/scripts/detect-app.sh "app/${{ inputs.app_path }}")" || { echo "$OUT"; exit 1; }
-          echo "$OUT"
-          echo "$OUT" | grep -E '^(stack|min_php|required_exts|node_version)=' >> "$GITHUB_OUTPUT"
-
   deploy:
-    needs: prepare
-    name: Build & deploy (${{ needs.prepare.outputs.stack }})
+    name: Build & deploy
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     timeout-minutes: 20
@@ -196,6 +158,8 @@ jobs:
         with:
           path: app
 
+      # Le kit est récupéré À LA VERSION EXACTE du workflow appelé (contexte
+      # job.workflow_sha) : workflow, scripts et actions restent cohérents.
       - name: Checkout xsel-deploy-mutualise (même version que ce workflow)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -203,274 +167,24 @@ jobs:
           ref: ${{ job.workflow_sha }}
           path: deploy-kit
 
-      - name: Exposer build_env aux étapes de build suivantes
-        if: inputs.build_env != ''
-        run: echo "${{ inputs.build_env }}" >> "$GITHUB_ENV"
-
-      # ---------------------------------------------------------------------
-      # Transport SSH (ADR-0001, ADR-0006) — ouvert d'abord : échec rapide si
-      # le serveur est injoignable, et le PHP du serveur est connu avant le build.
-      # ---------------------------------------------------------------------
-      - name: Configurer SSH (connexion partagée)
-        uses: ./deploy-kit/.github/actions/ssh-setup
+      - name: Déployer
+        uses: ./deploy-kit/.github/actions/deploy-app
         with:
-          host: ${{ secrets.SSH_HOST }}
-          port: ${{ secrets.SSH_PORT }}
-          user: ${{ secrets.SSH_USER }}
-          private_key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-      - name: Domaine servi (pour suivre le PHP cPanel du vhost)
-        if: needs.prepare.outputs.stack == 'laravel'
-        env:
-          HEALTH_URL: ${{ inputs.health_check_url }}
-        run: |
-          DOMAIN="${HEALTH_URL#*://}"
-          echo "WEB_DOMAIN=${DOMAIN%%[/:?]*}" >> "$GITHUB_ENV"
-
-      - name: Résoudre le PHP du serveur
-        if: needs.prepare.outputs.stack == 'laravel'
-        uses: ./deploy-kit/.github/actions/resolve-php
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          port: ${{ secrets.SSH_PORT }}
-          user: ${{ secrets.SSH_USER }}
-          php_bin: ${{ inputs.php_bin }}
+          stack: ${{ inputs.stack }}
+          app_path: ${{ inputs.app_path }}
+          deploy_path: ${{ inputs.deploy_path }}
+          health_check_url: ${{ inputs.health_check_url }}
           php_version: ${{ inputs.php_version }}
-          min_php: ${{ needs.prepare.outputs.min_php }}
-          domain: ${{ env.WEB_DOMAIN }}
-
-      # ---------------------------------------------------------------------
-      # Build — Laravel
-      # ---------------------------------------------------------------------
-      # Extensions PHP requises (détectées par le job prepare) : équipent le PHP
-      # du runner ET servent à vérifier/activer le PHP du serveur (préflight).
-      - name: Extensions PHP requises
-        if: needs.prepare.outputs.stack == 'laravel'
-        env:
-          EXTS: ${{ needs.prepare.outputs.required_exts }}
-        run: |
-          echo "extensions requises : ${EXTS:-aucune}"
-          echo "REQUIRED_EXTS=${EXTS}" >> "$GITHUB_ENV"
-          echo "REQUIRED_EXTS_CSV=${EXTS// /,}" >> "$GITHUB_ENV"
-
-      - name: Setup PHP
-        if: needs.prepare.outputs.stack == 'laravel'
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
-        with:
-          php-version: ${{ env.RESOLVED_PHP_VERSION }}
-          extensions: ${{ env.REQUIRED_EXTS_CSV }}
-          tools: composer:v2
-          coverage: none
-
-      - name: Setup Node (build assets Laravel)
-        if: needs.prepare.outputs.stack == 'laravel' && inputs.build_frontend_assets
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: ${{ needs.prepare.outputs.node_version }}
-          cache: 'npm'
-          cache-dependency-path: app/${{ inputs.app_path }}/package-lock.json
-
-      - name: npm ci && npm run build (assets Vite)
-        if: needs.prepare.outputs.stack == 'laravel' && inputs.build_frontend_assets
-        working-directory: app/${{ inputs.app_path }}
-        run: |
-          npm ci
-          npm run build
-
-      # --no-scripts : pas de artisan au build (pas de .env en CI) ; le serveur
-      # rejoue package:discover (deploy-laravel.sh). Pas de --classmap-authoritative
-      # pour rester identique au comportement historique (--optimize-autoloader).
-      - name: Installer les dépendances PHP (artefact de build)
-        if: needs.prepare.outputs.stack == 'laravel' && !inputs.composer_on_server
-        working-directory: app/${{ inputs.app_path }}
-        run: composer install --no-dev --prefer-dist --optimize-autoloader --no-scripts --no-interaction --no-progress
-
-      - name: Préparer le paquet à déployer (Laravel)
-        if: needs.prepare.outputs.stack == 'laravel'
-        run: |
-          mkdir -p /tmp/release
-          EXCL=(--exclude='.git' --exclude='.env' --exclude='.env.*'
-                --exclude='storage' --exclude='node_modules' --exclude='tests')
-          # vendor/ est livré tel quel (artefact CI) sauf mode composer_on_server.
-          if [ "${{ inputs.composer_on_server }}" = "true" ]; then
-            EXCL+=(--exclude='vendor')
-          fi
-          rsync -a "${EXCL[@]}" "app/${{ inputs.app_path }}/" /tmp/release/
-
-      # ---------------------------------------------------------------------
-      # Build — Next.js (Passenger)
-      # ---------------------------------------------------------------------
-      - name: Setup Node
-        if: needs.prepare.outputs.stack == 'nextjs-passenger'
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: ${{ needs.prepare.outputs.node_version }}
-          cache: 'npm'
-          cache-dependency-path: app/${{ inputs.app_path }}/package-lock.json
-
-      - name: npm ci && npm run build
-        if: needs.prepare.outputs.stack == 'nextjs-passenger'
-        working-directory: app/${{ inputs.app_path }}
-        run: |
-          npm ci
-          npm run build
-
-      - name: Préparer le paquet à déployer (Next.js standalone)
-        if: needs.prepare.outputs.stack == 'nextjs-passenger'
-        run: |
-          APP="app/${{ inputs.app_path }}"
-          [ -f "$APP/.next/standalone/server.js" ] || {
-            echo "::error::.next/standalone/server.js introuvable — ajoutez output: 'standalone' dans next.config (voir ADR-0003)."
-            exit 1
-          }
-          mkdir -p /tmp/release
-          rsync -a "$APP/.next/standalone/" /tmp/release/
-          mkdir -p /tmp/release/.next
-          rsync -a "$APP/.next/static/" /tmp/release/.next/static/
-          if [ -d "$APP/public" ]; then
-            rsync -a "$APP/public/" /tmp/release/public/
-          fi
-
-      # ---------------------------------------------------------------------
-      # Transport SSH (ADR-0001) + déploiement direct (ADR-0002)
-      # ---------------------------------------------------------------------
-      - name: Créer les dossiers de destination sur le serveur
-        # `rsync --mkpath` n'existe que depuis rsync 3.2.3 — beaucoup
-        # d'hébergements mutualisés tournent encore une version plus
-        # ancienne (ex. 3.1.3), qui rejette l'option et casse le flux
-        # protocole rsync (exit code 12). On crée les dossiers nous-mêmes.
-        run: |
-          ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "mkdir -p '${{ inputs.deploy_path }}' '${{ inputs.deploy_path }}/.deploy-scripts'"
-
-      - name: Préflight — vérifier le serveur avant de déployer
-        # Échoue vite et avec un message clair plutôt qu'au milieu du
-        # transfert/déploiement (cas vécus : rsync trop ancien pour une
-        # option utilisée, php_bin/composer_bin introuvables au chemin
-        # configuré, plus de place disque).
-        run: |
-          SCRIPT="command -v rsync >/dev/null || { echo '::error::rsync introuvable sur le serveur'; exit 1; }
-          echo \"rsync (serveur) : \$(rsync --version | head -1)\""
-
-          if [ "${{ needs.prepare.outputs.stack }}" = "laravel" ]; then
-            # Si un chemin est faux, on liste ce qui existe réellement sur le
-            # serveur : évite un aller-retour manuel en SSH pour le trouver.
-            read -r -d '' DIAG <<'EOS' || true
-          diag_bins() {
-            echo "binaires trouvés sur le serveur :"
-            for c in $(command -v php composer 2>/dev/null) /opt/alt/php*/usr/bin/php /opt/alt/php*/usr/bin/composer \
-                     /opt/cpanel/ea-php*/root/usr/bin/php /opt/cpanel/composer/bin/composer /usr/local/bin/composer \
-                     "$HOME/bin/composer" "$HOME/.local/bin/composer"; do
-              [ -x "$c" ] && echo "  - $c"
-            done
-          }
-          EOS
-            SCRIPT="$SCRIPT
-          $DIAG
-          command -v '${{ env.RESOLVED_PHP_BIN }}' >/dev/null || { echo \"::error::php_bin introuvable : ${{ env.RESOLVED_PHP_BIN }}\"; diag_bins; exit 1; }
-          echo \"php_bin : \$('${{ env.RESOLVED_PHP_BIN }}' -v | head -1)\""
-            if [ "${{ inputs.composer_on_server }}" = "true" ]; then
-              SCRIPT="$SCRIPT
-          command -v '${{ inputs.composer_bin }}' >/dev/null || echo COMPOSER_FALLBACK=1"
-            fi
-          fi
-
-          SCRIPT="$SCRIPT
-          FREE_MB=\$(df -Pm '${{ inputs.deploy_path }}' 2>/dev/null | tail -1 | awk '{print \$4}')
-          echo \"espace disque libre : \${FREE_MB:-?} Mo\"
-          [ -n \"\$FREE_MB\" ] && [ \"\$FREE_MB\" -lt 100 ] && { echo '::error::moins de 100 Mo disponibles sur le serveur'; exit 1; }
-          exit 0"
-
-          set -o pipefail
-          ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$SCRIPT" | tee /tmp/preflight.out
-
-          # composer absent du serveur (fréquent en mutualisé) : ce n'est pas
-          # bloquant, le workflow enverra le composer du runner (voir plus bas).
-          if grep -q '^COMPOSER_FALLBACK=1' /tmp/preflight.out; then
-            echo "::warning::composer_bin introuvable côté serveur (${{ inputs.composer_bin }}) — le composer du runner sera envoyé et exécuté avec php_bin"
-            echo "COMPOSER_FALLBACK=1" >> "$GITHUB_ENV"
-          fi
-
-      - name: Vérifier et activer les extensions PHP du serveur
-        # Échoue tôt (avant tout transfert) si une extension exigée par
-        # composer.lock manque ; tente d'abord de l'activer via CloudLinux
-        # PHP Selector (selectorctl) plutôt que de demander un clic manuel.
-        if: needs.prepare.outputs.stack == 'laravel'
-        run: |
-          ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "PHP_BIN='${{ env.RESOLVED_PHP_BIN }}' REQUIRED_EXTS='${REQUIRED_EXTS:-}' bash -s" \
-            < deploy-kit/scripts/ensure-php-extensions.sh
-
-      - name: Déployer le code sur le serveur (écrase en place)
-        # --delete réactivé, mais avec des exclusions protégées : sans ça,
-        # un fichier retiré du repo resterait indéfiniment sur le serveur.
-        # .deploy-scripts/.backups sont toujours protégés ; protect_paths
-        # ajoute les cas projet (ex. sous-dossier d'une autre app imbriquée).
-        run: |
-          EXCLUDES=(--exclude=.deploy-scripts --exclude=.backups)
-          if [ "${{ needs.prepare.outputs.stack }}" = "laravel" ]; then
-            EXCLUDES+=(--exclude=.env --exclude=storage --exclude=public/storage)
-          fi
-          if [ "${{ needs.prepare.outputs.stack }}" = "nextjs-passenger" ]; then
-            # cPanel "Setup Node.js App" génère son propre .htaccess (routage
-            # Passenger) au moment où l'app est créée — ni suivi en git, ni
-            # reproductible depuis le repo. --delete l'effacerait sinon à
-            # chaque déploiement (incident vécu sur PECI). tmp/ protégé pour
-            # la même raison (état géré par Passenger, pas par le déploiement).
-            EXCLUDES+=(--exclude=.htaccess --exclude=tmp)
-          fi
-          while IFS= read -r p; do
-            [ -n "$p" ] && EXCLUDES+=(--exclude="$p")
-          done <<< "${{ inputs.protect_paths }}"
-
-          rsync -az --delete "${EXCLUDES[@]}" \
-            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes" \
-            /tmp/release/ \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ inputs.deploy_path }}/"
-
-      - name: Envoyer les scripts de déploiement (toujours à jour, ADR-0004)
-        run: |
-          if [ "${COMPOSER_FALLBACK:-}" = "1" ]; then
-            COMPOSER_LOCAL="$(command -v composer || true)"
-            if [ -z "$COMPOSER_LOCAL" ] || ! php "$COMPOSER_LOCAL" --version >/dev/null 2>&1; then
-              echo "::error::composer absent du serveur ET du runner — renseignez composer_bin avec un chemin valide"
-              exit 1
-            fi
-            cp "$COMPOSER_LOCAL" deploy-kit/scripts/composer.phar
-            echo "composer du runner joint aux scripts : $(php "$COMPOSER_LOCAL" --version 2>/dev/null | head -1)"
-          fi
-          rsync -az -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes" \
-            deploy-kit/scripts/ \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ inputs.deploy_path }}/.deploy-scripts/"
-
-      - name: Aligner la version PHP du serveur web (MultiPHP, après le transfert)
-        if: needs.prepare.outputs.stack == 'laravel' && inputs.manage_web_php && inputs.health_check_url != ''
-        env:
-          HEALTH_URL: ${{ inputs.health_check_url }}
-        run: |
-          DOMAIN="${HEALTH_URL#*://}"
-          DOMAIN="${DOMAIN%%[/:?]*}"
-          ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "PHP_BIN='${{ env.RESOLVED_PHP_BIN }}' DOMAIN='${DOMAIN}' bash -s" \
-            < deploy-kit/scripts/ensure-web-php.sh
-
-      - name: Finaliser le déploiement (install/migrate ou restart + healthcheck)
-        run: |
-          SCRIPT="deploy-laravel.sh"
-          [ "${{ needs.prepare.outputs.stack }}" = "nextjs-passenger" ] && SCRIPT="deploy-nextjs-passenger.sh"
-
-          ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "DEPLOY_PATH='${{ inputs.deploy_path }}' HEALTH_CHECK_URL='${{ inputs.health_check_url }}' PHP_BIN='${{ env.RESOLVED_PHP_BIN }}' COMPOSER_BIN='${{ inputs.composer_bin }}' COMPOSER_ON_SERVER='${{ inputs.composer_on_server }}' bash '${{ inputs.deploy_path }}/.deploy-scripts/${SCRIPT}'"
-
-      - name: Fermer la connexion SSH partagée
-        if: always()
-        env:
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PORT: ${{ secrets.SSH_PORT }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-        run: ssh -O exit -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" 2>/dev/null || true
+          php_bin: ${{ inputs.php_bin }}
+          node_version: ${{ inputs.node_version }}
+          build_frontend_assets: ${{ inputs.build_frontend_assets }}
+          composer_on_server: ${{ inputs.composer_on_server }}
+          composer_bin: ${{ inputs.composer_bin }}
+          php_extensions: ${{ inputs.php_extensions }}
+          manage_web_php: ${{ inputs.manage_web_php }}
+          build_env: ${{ inputs.build_env }}
+          protect_paths: ${{ inputs.protect_paths }}
+          ssh_host: ${{ secrets.SSH_HOST }}
+          ssh_port: ${{ secrets.SSH_PORT }}
+          ssh_user: ${{ secrets.SSH_USER }}
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}

@@ -59,19 +59,17 @@ if [ "$STACK" = "laravel" ]; then
   REQUIRED_EXTS="${REQUIRED_EXTS% }"
 fi
 
-NODE_VERSION=""
-if [ "$STACK" = "nextjs-passenger" ]; then
-  NODE_VERSION="${NODE_INPUT:-}"
-  if [ -z "$NODE_VERSION" ]; then
-    for f in "$DIR/.nvmrc" "$DIR/.node-version"; do
-      [ -f "$f" ] && NODE_VERSION="$(grep -oE '[0-9]+' "$f" | head -n 1 || true)" && [ -n "$NODE_VERSION" ] && break
-    done
-  fi
-  if [ -z "$NODE_VERSION" ] && [ -f "$DIR/package.json" ]; then
-    NODE_VERSION="$(jq -r '.engines.node // ""' "$DIR/package.json" | grep -oE '[0-9]+' | head -n 1 || true)"
-  fi
-  NODE_VERSION="${NODE_VERSION:-22}"
+# Node : Next.js toujours ; Laravel aussi (assets Vite) — même règle de détection.
+NODE_VERSION="${NODE_INPUT:-}"
+if [ -z "$NODE_VERSION" ]; then
+  for f in "$DIR/.nvmrc" "$DIR/.node-version"; do
+    [ -f "$f" ] && NODE_VERSION="$(grep -oE '[0-9]+' "$f" | head -n 1 || true)" && [ -n "$NODE_VERSION" ] && break
+  done
 fi
+if [ -z "$NODE_VERSION" ] && [ -f "$DIR/package.json" ]; then
+  NODE_VERSION="$(jq -r '.engines.node // ""' "$DIR/package.json" | grep -oE '[0-9]+' | head -n 1 || true)"
+fi
+NODE_VERSION="${NODE_VERSION:-22}"
 
 echo "stack=${STACK}"
 echo "min_php=${MIN_PHP}"

@@ -1,0 +1,38 @@
+# À copier dans le projet : .xsel-deploy.yml (racine du dépôt).
+# Convention plutôt que configuration : seules les valeurs propres au projet sont
+# obligatoires ; stack, version de PHP/Node, binaire PHP, extensions PHP sont
+# détectés. Tout peut être surchargé, app par app.
+version: 1
+
+# environment: production      # Environment GitHub du déploiement (approbation : Settings → Environments)
+# deploy_branch: main          # branche qui déclenche le déploiement (défaut : main)
+
+apps:
+  # L'ordre compte : les apps se déploient dans cet ordre, une à la fois
+  # (ex. l'API avant le frontend qui l'appelle).
+  backend:
+    path: backend                         # défaut : le nom de l'app
+    deploy_path: /home/UTILISATEUR/public_html/api.example.com
+    health_check_url: https://api.example.com/up
+    database: mysql                       # CI Laravel : conteneur MySQL 8 (défaut : none)
+    # lint: true                          # Pint (Laravel) / npm run lint (Next) en CI
+    # ci: none                            # désactiver la CI standard de cette app
+    # deploy: false                       # tester sans déployer
+    # php_version: "8.4"                  # défaut : PHP cPanel du domaine, sinon le plus bas >= composer.json
+    # php_bin: /opt/alt/php84/usr/bin/php # défaut : auto
+    # php_extensions: [intl, gd]          # en plus de celles de composer.lock
+    # composer_on_server: false           # true : composer install sur le serveur (ancien mode)
+    # manage_web_php: true                # false : ne jamais toucher au PHP du domaine (cPanel)
+    # build_frontend_assets: false        # défaut : true seulement si package.json a un script build
+    # protect_paths: [public/uploads]     # protégés de rsync --delete (.env, storage/ le sont déjà)
+
+  frontend:
+    path: frontend
+    deploy_path: /home/UTILISATEUR/nextjs-app
+    health_check_url: https://example.com
+    build_env:                            # figé au build (NEXT_PUBLIC_*), jamais relu au runtime
+      NEXT_PUBLIC_API_URL: https://api.example.com/api/v1
+    # node_version: "22"                  # défaut : .nvmrc / engines.node, sinon 22
+
+# monitor:
+#   urls: [https://api.example.com/up, https://example.com]   # défaut : les health_check_url

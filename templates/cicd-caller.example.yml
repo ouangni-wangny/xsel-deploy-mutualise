@@ -1,0 +1,38 @@
+# À copier tel quel dans le projet : .github/workflows/cicd.yml
+# C'est le SEUL workflow que porte un projet (avec le manifeste .xsel-deploy.yml).
+# Le kit décide quoi lancer selon l'événement et les fichiers modifiés :
+#   pull_request / push        -> CI des apps concernées
+#   push sur la branche de déploiement -> puis déploiement (une app à la fois)
+#   lancement manuel           -> déploiement, ou diagnostic serveur (action: doctor)
+#   cron                       -> monitoring des URLs
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Que faire ?"
+        type: choice
+        options: [deploy, doctor]
+        default: deploy
+      apps:
+        description: "Apps concernées (noms séparés par des virgules ; vide = toutes)"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  pipeline:
+    # @v1 : tag flottant (dernière version 1.x.y qui a passé les tests du kit).
+    # Pour figer : @v1.4.0 (ou un SHA de commit).
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/pipeline.yml@v1
+    # Secrets attendus dans le projet : DEPLOY_SSH_HOST, DEPLOY_SSH_PORT,
+    # DEPLOY_SSH_USER, DEPLOY_SSH_PRIVATE_KEY.
+    secrets: inherit
