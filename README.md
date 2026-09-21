@@ -18,12 +18,57 @@ direct), [ADR-0003](docs/adr/0003-nextjs-passenger.md) (Next.js/Passenger),
 [ADR-0004](docs/adr/0004-central-reusable-workflow.md) (repo central),
 [ADR-0005](docs/adr/0005-ci-cd-separation.md) (CI/CD séparés).
 
+## Démarrage rapide — deux fichiers dans le projet
+
+Un projet ne porte que **deux fichiers** (plus 4 secrets GitHub) ; toute la
+logique reste ici.
+
+1. [`templates/cicd-caller.example.yml`](templates/cicd-caller.example.yml) →
+   `.github/workflows/cicd.yml` : 25 lignes, jamais modifiées ensuite.
+2. [`templates/xsel-deploy.example.yml`](templates/xsel-deploy.example.yml) →
+   `.xsel-deploy.yml` : ce qui est propre au projet.
+   ```yaml
+   version: 1
+   apps:
+     backend:
+       deploy_path: /home/utilisateur/public_html/api.example.com
+       health_check_url: https://api.example.com/up
+       database: mysql          # CI : conteneur MySQL pour les tests
+     frontend:
+       deploy_path: /home/utilisateur/nextjs-app
+       health_check_url: https://example.com
+       build_env: { NEXT_PUBLIC_API_URL: https://api.example.com/api/v1 }
+   ```
+3. Secrets : `DEPLOY_SSH_HOST`, `DEPLOY_SSH_PORT`, `DEPLOY_SSH_USER`,
+   `DEPLOY_SSH_PRIVATE_KEY` ([onboarding](#onboarding-dun-nouveau-projet)).
+
+Stack, versions de PHP/Node, binaire PHP du serveur et extensions PHP sont
+**détectés**. Le kit décide quoi lancer :
+
+| Événement | Ce qui tourne |
+|---|---|
+| `pull_request` | CI des apps dont les fichiers ont changé |
+| `push` sur `main` | CI des apps modifiées, **puis** déploiement (une app à la fois, dans l'ordre du manifeste) |
+| lancement manuel | déploiement (toutes les apps ou une liste), ou **diagnostic serveur** (`action: doctor`) |
+| cron (15 min) | monitoring des URLs |
+
+Le manifeste, ou tout fichier sous `.github/`, modifié → toutes les apps sont
+concernées. Détails : [ADR-0010](docs/adr/0010-pipeline-manifest-composite-actions.md).
+
+`@v1` est un tag **flottant** (dernière version 1.x.y dont les tests ont
+passé, déplacé par [`release.yml`](.github/workflows/release.yml)) : les
+projets reçoivent les correctifs sans rien modifier. Pour figer, `@v1.4.0`
+ou un SHA de commit.
+
+Les workflows individuels (`deploy.yml`, `doctor.yml`, `monitor.yml`) restent
+disponibles pour les cas particuliers ; ils partagent la même logique
+(actions composites `deploy-app`, `ci-app`, `doctor-app`).
+
 ## Comment ça marche, en une phrase
 
-Push sur `main` → la CI du projet tourne (tests) → si elle passe, un
-workflow appelant (quelques lignes, dans le projet) invoque
-`deploy.yml` de ce repo → build, transfert SSH/rsync, install/migrations
-côté serveur, healthcheck.
+Push sur `main` → `pipeline.yml` lit le manifeste, lance la CI des apps
+modifiées puis, si elle passe, déploie : build, transfert SSH/rsync,
+install/migrations côté serveur, healthcheck.
 
 ---
 
@@ -317,7 +362,12 @@ Conçu par ADR, validé en conditions réelles sur PECI (plusieurs incidents
 rencontrés et corrigés en direct — voir les ADR et l'historique des
 commits). Versions taguées :
 
-- **`v1.3.1`** (courant) — corrige un bug de `v1.3.0` : un `php_bin` explicite
+- **`v1.4.0`** (courant) — point d'entrée unique **`pipeline.yml`** +
+  manifeste `.xsel-deploy.yml` (CI standard, déploiement séquentiel des apps
+  modifiées, diagnostic, monitoring), logique déplacée dans des actions
+  composites, tag flottant **`v1`** géré par `release.yml`. Voir
+  [ADR-0010](docs/adr/0010-pipeline-manifest-composite-actions.md).
+- **`v1.3.1`** — corrige un bug de `v1.3.0` : un `php_bin` explicite
   était ignoré (traité comme `auto`) ; tests de câblage des workflows. **Ne pas
   utiliser `v1.3.0`.**
 - **`v1.3.0`** — *convention plutôt que configuration* : `stack`,
