@@ -317,7 +317,10 @@ Conçu par ADR, validé en conditions réelles sur PECI (plusieurs incidents
 rencontrés et corrigés en direct — voir les ADR et l'historique des
 commits). Versions taguées :
 
-- **`v1.3.0`** (courant) — *convention plutôt que configuration* : `stack`,
+- **`v1.3.1`** (courant) — corrige un bug de `v1.3.0` : un `php_bin` explicite
+  était ignoré (traité comme `auto`) ; tests de câblage des workflows. **Ne pas
+  utiliser `v1.3.0`.**
+- **`v1.3.0`** — *convention plutôt que configuration* : `stack`,
   `php_version`, `php_bin`, `node_version` et extensions PHP sont détectés ;
   nouveau workflow **`doctor`** (diagnostic serveur en lecture seule + config
   suggérée) ; le kit est récupéré **à la version exacte du workflow appelé**

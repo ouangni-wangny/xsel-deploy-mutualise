@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   backend:
-    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/doctor.yml@v1.3.0
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/doctor.yml@v1.3.1
     with:
       app_path: backend
       deploy_path: /home/UTILISATEUR/public_html/api.example.com

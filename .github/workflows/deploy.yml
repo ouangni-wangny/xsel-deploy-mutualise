@@ -234,7 +234,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           port: ${{ secrets.SSH_PORT }}
           user: ${{ secrets.SSH_USER }}
-          php_bin: ${{ env.RESOLVED_PHP_BIN }}
+          php_bin: ${{ inputs.php_bin }}
           php_version: ${{ inputs.php_version }}
           min_php: ${{ needs.prepare.outputs.min_php }}
           domain: ${{ env.WEB_DOMAIN }}
