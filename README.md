@@ -305,7 +305,10 @@ Conçu par ADR, validé en conditions réelles sur PECI (plusieurs incidents
 rencontrés et corrigés en direct — voir les ADR et l'historique des
 commits). Versions taguées :
 
-- **`v1.0.3`** (courant) — le préflight liste les binaires php/composer
+- **`v1.0.4`** (courant) — hébergeurs sans composer : le workflow envoie
+  le `composer.phar` du runner, exécuté avec `php_bin` (le préflight ne
+  bloque plus sur `composer_bin` introuvable).
+- **`v1.0.3`** — le préflight liste les binaires php/composer
   réellement présents sur le serveur quand `php_bin`/`composer_bin` est faux.
 - **`v1.0.2`** — une seule connexion SSH par déploiement
   (`ControlMaster`), `ConnectTimeout` et retry : corrige les blocages

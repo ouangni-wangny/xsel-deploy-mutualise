@@ -290,7 +290,7 @@ jobs:
             SCRIPT="$SCRIPT
           $DIAG
           command -v '${{ inputs.php_bin }}' >/dev/null || { echo \"::error::php_bin introuvable : ${{ inputs.php_bin }}\"; diag_bins; exit 1; }
-          command -v '${{ inputs.composer_bin }}' >/dev/null || { echo \"::error::composer_bin introuvable : ${{ inputs.composer_bin }}\"; diag_bins; exit 1; }
+          command -v '${{ inputs.composer_bin }}' >/dev/null || echo COMPOSER_FALLBACK=1
           echo \"php_bin : \$('${{ inputs.php_bin }}' -v | head -1)\""
           fi
 
@@ -300,8 +300,16 @@ jobs:
           [ -n \"\$FREE_MB\" ] && [ \"\$FREE_MB\" -lt 100 ] && { echo '::error::moins de 100 Mo disponibles sur le serveur'; exit 1; }
           exit 0"
 
+          set -o pipefail
           ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$SCRIPT"
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$SCRIPT" | tee /tmp/preflight.out
+
+          # composer absent du serveur (fréquent en mutualisé) : ce n'est pas
+          # bloquant, le workflow enverra le composer du runner (voir plus bas).
+          if grep -q '^COMPOSER_FALLBACK=1' /tmp/preflight.out; then
+            echo "::warning::composer_bin introuvable côté serveur (${{ inputs.composer_bin }}) — le composer du runner sera envoyé et exécuté avec php_bin"
+            echo "COMPOSER_FALLBACK=1" >> "$GITHUB_ENV"
+          fi
 
       - name: Déployer le code sur le serveur (écrase en place)
         # --delete réactivé, mais avec des exclusions protégées : sans ça,
@@ -332,6 +340,15 @@ jobs:
 
       - name: Envoyer les scripts de déploiement (toujours à jour, ADR-0004)
         run: |
+          if [ "${COMPOSER_FALLBACK:-}" = "1" ]; then
+            COMPOSER_LOCAL="$(command -v composer || true)"
+            if [ -z "$COMPOSER_LOCAL" ] || ! php "$COMPOSER_LOCAL" --version >/dev/null 2>&1; then
+              echo "::error::composer absent du serveur ET du runner — renseignez composer_bin avec un chemin valide"
+              exit 1
+            fi
+            cp "$COMPOSER_LOCAL" deploy-kit/scripts/composer.phar
+            echo "composer du runner joint aux scripts : $(php "$COMPOSER_LOCAL" --version 2>/dev/null | head -1)"
+          fi
           rsync -az -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes" \
             deploy-kit/scripts/ \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ inputs.deploy_path }}/.deploy-scripts/"

@@ -9,7 +9,9 @@
 # Variables d'environnement requises :
 #   DEPLOY_PATH        racine de l'app (code déployé directement dedans)
 #   PHP_BIN              (défaut: php)
-#   COMPOSER_BIN          (défaut: composer)
+#   COMPOSER_BIN          (défaut: composer) — si introuvable, repli sur
+#                         .deploy-scripts/composer.phar (envoyé par le workflow)
+#                         exécuté avec PHP_BIN
 #   HEALTH_CHECK_URL         (optionnel — si vide, pas de vérification post-deploy)
 # =============================================================================
 set -euo pipefail
@@ -30,8 +32,20 @@ mkdir -p "${DEPLOY_PATH}/storage/framework"/{cache,sessions,views}
 
 cd "$DEPLOY_PATH"
 
+# Hébergeurs sans composer : le workflow envoie le composer.phar du runner
+# (voir « Envoyer les scripts »), exécuté avec PHP_BIN pour garantir la bonne
+# version de PHP.
+if command -v "$COMPOSER_BIN" >/dev/null 2>&1; then
+  COMPOSER_CMD=("$COMPOSER_BIN")
+elif [ -f "${SCRIPT_DIR}/composer.phar" ]; then
+  log "composer introuvable (${COMPOSER_BIN}) — composer.phar du workflow exécuté avec ${PHP_BIN}"
+  COMPOSER_CMD=("$PHP_BIN" "${SCRIPT_DIR}/composer.phar")
+else
+  die "composer introuvable : ${COMPOSER_BIN} (et pas de composer.phar fourni par le workflow)"
+fi
+
 log "composer install --no-dev"
-"$COMPOSER_BIN" install --no-dev --optimize-autoloader --no-interaction --no-progress
+"${COMPOSER_CMD[@]}" install --no-dev --optimize-autoloader --no-interaction --no-progress
 
 log "artisan config:cache / route:cache / view:cache"
 "$PHP_BIN" artisan config:cache
