@@ -60,7 +60,39 @@ health_diagnose() {
       echo "aucun fichier de log dans ${log_dir}"
     fi
   fi
+  web_php_evidence "$url"
   echo "------------------"
+}
+
+# Preuves sur la version de PHP réellement servie (sans rien modifier) :
+# en-têtes de réponse, directives PHP des .htaccess déployés, version choisie
+# dans le PHP Selector CloudLinux et fiche cPanel (MultiPHP) du vhost.
+web_php_evidence() {
+  local url="$1" host
+  host="${url#*://}"; host="${host%%[/:?]*}"
+  echo "en-têtes de réponse :"
+  curl -sSI --max-time 10 "$url" 2>/dev/null | grep -iE '^(HTTP|server|x-powered-by|x-litespeed)' | tr -d '\r' | sed 's/^/  /' || true
+  if [ -n "${DEPLOY_PATH:-}" ]; then
+    echo ".htaccess : directives PHP :"
+    grep -nHiE 'AddHandler|SetHandler|AddType.*php|php_value|suPHP|FcgidWrapper|alt-php|ea-php' \
+      "${DEPLOY_PATH}/.htaccess" "${DEPLOY_PATH}/public/.htaccess" 2>/dev/null | cut -c1-200 | head -n 8 | sed 's/^/  /' || true
+    [ -f "${DEPLOY_PATH}/.htaccess" ] || echo "  (pas de ${DEPLOY_PATH}/.htaccess)"
+  fi
+  if command -v selectorctl >/dev/null 2>&1; then
+    echo "PHP Selector (selectorctl --user-summary) :"
+    selectorctl --user-summary 2>&1 | head -n 12 | sed 's/^/  /' || true
+  fi
+  if command -v uapi >/dev/null 2>&1 && [ -n "$host" ]; then
+    echo "cPanel MultiPHP (${host}) :"
+    uapi --output=json LangPHP php_get_vhost_versions 2>/dev/null \
+      | "${PHP_BIN:-php}" -r '$j = json_decode(stream_get_contents(STDIN), true);
+          foreach (($j["result"]["data"] ?? []) as $v) {
+            if (($v["vhost"] ?? "") === $argv[1]) {
+              echo "  version=", $v["version"] ?? "?", " php_fpm=", (int) ($v["php_fpm"] ?? 0),
+                   " source=", json_encode($v["phpversion_source"] ?? null), "\n";
+            }
+          }' "$host" 2>/dev/null || true
+  fi
 }
 
 # Dump la base MySQL/MariaDB décrite par un .env Laravel avant une migration.
