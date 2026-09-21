@@ -27,7 +27,8 @@ command -v curl >/dev/null && echo "curl : présent" || echo "curl : ABSENT (hea
 
 if [ "$STACK" = "laravel" ]; then
   section "PHP installés"
-  for p in /opt/alt/php*/usr/bin/php /opt/cpanel/ea-php*/root/usr/bin/php "$(command -v php 2>/dev/null)"; do
+  # Versions >= 8.0 seulement (les anciennes ne concernent aucun projet actuel).
+  for p in /opt/alt/php8*/usr/bin/php /opt/alt/php9*/usr/bin/php /opt/cpanel/ea-php8*/root/usr/bin/php /opt/cpanel/ea-php9*/root/usr/bin/php "$(command -v php 2>/dev/null)"; do
     [ -x "$p" ] && echo "  $p → $("$p" -r 'echo PHP_VERSION;' 2>/dev/null)"
   done
   echo "retenu pour le déploiement : ${PHP_BIN}"

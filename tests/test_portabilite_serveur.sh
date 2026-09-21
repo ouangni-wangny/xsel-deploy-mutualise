@@ -9,3 +9,8 @@ test_pas_de_substitution_de_processus() {
 test_scripts_serveur_passent_bash_n() {
   for f in "$REPO"/scripts/*.sh "$REPO"/scripts/lib/*.sh; do bash -n "$f" || fail "erreur de syntaxe : $f"; done
 }
+test_common_sh_se_charge_depuis_stdin_sans_erreur() {
+  # doctor envoie `cat common.sh doctor.sh | ssh bash -s` : BASH_SOURCE est vide.
+  run bash -c "set -u; bash -s < '$REPO/scripts/lib/common.sh'"
+  assert_eq "$RC" 0; assert_not_contains "$OUT" "unbound variable"
+}

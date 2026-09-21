@@ -13,7 +13,8 @@
 set -euo pipefail
 
 # Dossier de ce fichier (pour retrouver read-db-env.php à côté).
-COMMON_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# (${BASH_SOURCE[0]:-$0} : le fichier peut aussi être lu sur stdin, cf. doctor.)
+COMMON_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo .)"
 
 log()  { echo "▶ $*"; }
 ok()   { echo "✅ $*"; }
@@ -85,7 +86,7 @@ web_php_evidence() {
   fi
   if command -v selectorctl >/dev/null 2>&1; then
     echo "PHP Selector (selectorctl --user-summary) :"
-    selectorctl --user-summary 2>&1 | head -n 12 | sed 's/^/  /' || true
+    selectorctl --user-summary 2>&1 | head -n 40 | sed 's/^/  /' || true
   fi
   if command -v uapi >/dev/null 2>&1 && [ -n "$host" ]; then
     echo "cPanel MultiPHP (${host}) :"
