@@ -33,11 +33,17 @@ composer.
   avertissement (non bloquant) signale les extensions absentes du PHP web
   `ea-phpXY`, que le selector ne pilote pas.
 - **PHP web aligné** (`scripts/ensure-web-php.sh`, entrée `manage_web_php`,
-  défaut `true`) : le PHP CLI (`php_bin`) et le PHP qui sert le domaine
-  (cPanel MultiPHP) sont indépendants ; un décalage produit un HTTP 500 après
-  un déploiement « réussi » (cas SIS : `platform_check` « requires PHP >= 8.3 »).
-  Le script lit la version du vhost (`uapi LangPHP php_get_vhost_versions`),
-  l'aligne si besoin (`php_set_vhost_versions`) et ne bloque jamais.
+  défaut `true`, exécuté **après** le transfert du code) : le PHP CLI
+  (`php_bin`) et le PHP qui sert le domaine (cPanel MultiPHP) sont
+  indépendants. MultiPHP applique la version en écrivant un bloc
+  `# php -- BEGIN cPanel-generated handler` dans le `.htaccess` du document
+  root ; un `rsync` qui écrase ce `.htaccess` (versionné dans le repo)
+  supprime le bloc et le domaine retombe sur le PHP hérité du dossier parent,
+  alors que `uapi` continue d'annoncer la bonne version (cas SIS : web en
+  8.1.34 pour un CLI en 8.4, donc HTTP 500 via `platform_check`). Le script
+  aligne la version dans cPanel (`uapi LangPHP`), puis (ré)installe le bloc
+  handler dans le `.htaccess` du docroot (idempotent, règles existantes
+  conservées). Il ne bloque jamais le déploiement.
 - **Échecs lisibles** : `health_check` affiche le code HTTP, le début de la
   réponse et les dernières lignes `.ERROR:` de Laravel ; la sauvegarde DB lit
   le `.env` avec phpdotenv (le parseur de Laravel) au lieu de `grep/cut`, et

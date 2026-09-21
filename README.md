@@ -308,7 +308,10 @@ Conçu par ADR, validé en conditions réelles sur PECI (plusieurs incidents
 rencontrés et corrigés en direct — voir les ADR et l'historique des
 commits). Versions taguées :
 
-- **`v1.1.1`** (courant) — aligne la version PHP du domaine (MultiPHP, entrée
+- **`v1.1.2`** (courant) — le handler PHP du domaine est réinstallé dans le
+  `.htaccess` après chaque transfert (le rsync l'effaçait : site en PHP hérité
+  du parent, HTTP 500) ; diagnostic de la version web réellement exécutée.
+- **`v1.1.1`** — aligne la version PHP du domaine (MultiPHP, entrée
   `manage_web_php`) ; healthcheck avec diagnostic ; sauvegarde DB fiable
   (lecture du `.env` via phpdotenv, `--no-tablespaces`).
 - **`v1.1.0`** — *build once* : `composer install` sur le runner,

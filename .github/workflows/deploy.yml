@@ -385,18 +385,6 @@ jobs:
             "PHP_BIN='${{ inputs.php_bin }}' REQUIRED_EXTS='${REQUIRED_EXTS:-}' bash -s" \
             < deploy-kit/scripts/ensure-php-extensions.sh
 
-      - name: Aligner la version PHP du serveur web (MultiPHP)
-        if: inputs.stack == 'laravel' && inputs.manage_web_php && inputs.health_check_url != ''
-        env:
-          HEALTH_URL: ${{ inputs.health_check_url }}
-        run: |
-          DOMAIN="${HEALTH_URL#*://}"
-          DOMAIN="${DOMAIN%%[/:?]*}"
-          ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "PHP_BIN='${{ inputs.php_bin }}' DOMAIN='${DOMAIN}' bash -s" \
-            < deploy-kit/scripts/ensure-web-php.sh
-
       - name: Déployer le code sur le serveur (écrase en place)
         # --delete réactivé, mais avec des exclusions protégées : sans ça,
         # un fichier retiré du repo resterait indéfiniment sur le serveur.
@@ -438,6 +426,18 @@ jobs:
           rsync -az -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes" \
             deploy-kit/scripts/ \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ inputs.deploy_path }}/.deploy-scripts/"
+
+      - name: Aligner la version PHP du serveur web (MultiPHP, après le transfert)
+        if: inputs.stack == 'laravel' && inputs.manage_web_php && inputs.health_check_url != ''
+        env:
+          HEALTH_URL: ${{ inputs.health_check_url }}
+        run: |
+          DOMAIN="${HEALTH_URL#*://}"
+          DOMAIN="${DOMAIN%%[/:?]*}"
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "PHP_BIN='${{ inputs.php_bin }}' DOMAIN='${DOMAIN}' bash -s" \
+            < deploy-kit/scripts/ensure-web-php.sh
 
       - name: Finaliser le déploiement (install/migrate ou restart + healthcheck)
         run: |
