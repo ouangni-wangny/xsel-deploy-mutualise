@@ -49,9 +49,11 @@ installed_versions() {
 
 find_bin() {
   local c
-  while read -r c; do
+  # Pas de substitution de processus (< <(...)) : /dev/fd est absent sous
+  # CageFS. `for` sur la sortie d'une fonction (sans espace dans les chemins).
+  for c in $(candidates_for "$1"); do
     [ -x "$c" ] && { echo "$c"; return 0; }
-  done < <(candidates_for "$1")
+  done
   # php du PATH si c'est bien cette version
   if command -v php >/dev/null 2>&1 && [ "$(bin_version php)" = "$1" ]; then command -v php; return 0; fi
   return 1
@@ -87,9 +89,9 @@ else
     fi
   fi
   if [ -z "$WANT" ] && [ -n "$MIN" ]; then
-    while read -r v; do
-      [ -n "$v" ] && [ "$(num "$v")" -ge "$(num "$MIN")" ] && { WANT="$v"; SOURCE="plus basse version installée >= ${MIN} (composer.json)"; break; }
-    done < <(installed_versions)
+    for v in $(installed_versions); do
+      [ "$(num "$v")" -ge "$(num "$MIN")" ] && { WANT="$v"; SOURCE="plus basse version installée >= ${MIN} (composer.json)"; break; }
+    done
   fi
   if [ -z "$WANT" ] && command -v php >/dev/null 2>&1; then
     WANT="$(bin_version php)"; SOURCE="php du PATH"
