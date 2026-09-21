@@ -275,9 +275,22 @@ jobs:
           echo \"rsync (serveur) : \$(rsync --version | head -1)\""
 
           if [ "${{ inputs.stack }}" = "laravel" ]; then
+            # Si un chemin est faux, on liste ce qui existe réellement sur le
+            # serveur : évite un aller-retour manuel en SSH pour le trouver.
+            read -r -d '' DIAG <<'EOS' || true
+          diag_bins() {
+            echo "binaires trouvés sur le serveur :"
+            for c in $(command -v php composer 2>/dev/null) /opt/alt/php*/usr/bin/php /opt/alt/php*/usr/bin/composer \
+                     /opt/cpanel/ea-php*/root/usr/bin/php /opt/cpanel/composer/bin/composer /usr/local/bin/composer \
+                     "$HOME/bin/composer" "$HOME/.local/bin/composer"; do
+              [ -x "$c" ] && echo "  - $c"
+            done
+          }
+          EOS
             SCRIPT="$SCRIPT
-          command -v '${{ inputs.php_bin }}' >/dev/null || { echo \"::error::php_bin introuvable : ${{ inputs.php_bin }}\"; exit 1; }
-          command -v '${{ inputs.composer_bin }}' >/dev/null || { echo \"::error::composer_bin introuvable : ${{ inputs.composer_bin }}\"; exit 1; }
+          $DIAG
+          command -v '${{ inputs.php_bin }}' >/dev/null || { echo \"::error::php_bin introuvable : ${{ inputs.php_bin }}\"; diag_bins; exit 1; }
+          command -v '${{ inputs.composer_bin }}' >/dev/null || { echo \"::error::composer_bin introuvable : ${{ inputs.composer_bin }}\"; diag_bins; exit 1; }
           echo \"php_bin : \$('${{ inputs.php_bin }}' -v | head -1)\""
           fi
 

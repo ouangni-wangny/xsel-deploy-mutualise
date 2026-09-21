@@ -305,7 +305,9 @@ Conçu par ADR, validé en conditions réelles sur PECI (plusieurs incidents
 rencontrés et corrigés en direct — voir les ADR et l'historique des
 commits). Versions taguées :
 
-- **`v1.0.2`** (courant) — une seule connexion SSH par déploiement
+- **`v1.0.3`** (courant) — le préflight liste les binaires php/composer
+  réellement présents sur le serveur quand `php_bin`/`composer_bin` est faux.
+- **`v1.0.2`** — une seule connexion SSH par déploiement
   (`ControlMaster`), `ConnectTimeout` et retry : corrige les blocages
   « `ssh: connect … Connection timed out` » sur les hébergeurs qui limitent
   les connexions par IP ([ADR-0006](docs/adr/0006-ssh-connection-multiplexing.md)).
