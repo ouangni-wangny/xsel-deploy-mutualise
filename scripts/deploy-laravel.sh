@@ -75,7 +75,7 @@ log "artisan storage:link"
 "$PHP_BIN" artisan storage:link --force || true
 
 if [ -n "$HEALTH_CHECK_URL" ]; then
-  health_check "$HEALTH_CHECK_URL" || die "Déploiement terminé mais healthcheck KO — le code est en place, vérifiez manuellement (pas de rollback automatique, voir ADR-0002)."
+  health_check "$HEALTH_CHECK_URL" "${DEPLOY_PATH}/storage/logs" || die "Déploiement terminé mais healthcheck KO — le code est en place, vérifiez manuellement (pas de rollback automatique, voir ADR-0002)."
 fi
 
 ok "Déploiement Laravel terminé : ${DEPLOY_PATH}"

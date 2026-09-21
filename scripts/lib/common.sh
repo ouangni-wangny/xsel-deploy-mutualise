@@ -20,18 +20,44 @@ die()  { echo "❌ $*" >&2; exit 1; }
 # faire — voir ADR-0002 : pas de rollback automatique, le déploiement est
 # déjà en place au moment où ce check tourne).
 health_check() {
-  local url="$1"
+  local url="$1" log_dir="${2:-}"
   [ -n "$url" ] || return 0
   log "Healthcheck : ${url}"
+  local code=""
   for _ in 1 2 3 4 5; do
-    if curl -fsS -o /dev/null --max-time 10 "$url"; then
-      ok "Healthcheck OK"
-      return 0
-    fi
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$url" 2>/dev/null || true)"
+    case "$code" in
+      2??|3??)
+        ok "Healthcheck OK (HTTP ${code})"
+        return 0
+        ;;
+    esac
     sleep 3
   done
-  echo "❌ Healthcheck KO après 5 tentatives" >&2
+  echo "❌ Healthcheck KO après 5 tentatives (dernier code HTTP : ${code:-aucun})" >&2
+  health_diagnose "$url" "$log_dir" >&2
   return 1
+}
+
+# Diagnostic après un healthcheck KO : début de la réponse et dernières
+# erreurs applicatives Laravel (lignes ".ERROR:" seulement, tronquées — pas
+# de trace complète : ces logs CI sont lisibles par les collaborateurs).
+health_diagnose() {
+  local url="$1" log_dir="$2" latest
+  echo "--- diagnostic ---"
+  echo "réponse (300 premiers caractères) :"
+  curl -sS --max-time 10 "$url" 2>&1 | head -c 300 | tr -d '\r' | sed 's/^/  /' || true
+  echo
+  if [ -n "$log_dir" ] && [ -d "$log_dir" ]; then
+    latest="$(ls -t "$log_dir"/*.log 2>/dev/null | head -n 1 || true)"
+    if [ -n "$latest" ]; then
+      echo "dernières erreurs applicatives (${latest##*/}) :"
+      grep -h '\.ERROR:' "$latest" 2>/dev/null | tail -n 3 | cut -c1-400 | sed 's/^/  /' || true
+    else
+      echo "aucun fichier de log dans ${log_dir}"
+    fi
+  fi
+  echo "------------------"
 }
 
 # Dump la base MySQL/MariaDB décrite par un .env Laravel avant une migration.
@@ -63,14 +89,21 @@ backup_database() {
   file="${backup_dir}/$(date -u +%Y%m%d%H%M%S).sql.gz"
 
   log "Sauvegarde DB -> ${file}"
-  if MYSQL_PWD="$db_pass" mysqldump --single-transaction --quick \
-      -h "${db_host:-127.0.0.1}" -P "${db_port:-3306}" -u "$db_user" "$db_name" 2>/dev/null \
+  # MySQL 8 exige le privilège PROCESS pour les tablespaces : rarement accordé
+  # en mutualisé, et inutile pour une sauvegarde applicative.
+  local extra=() err
+  mysqldump --help 2>/dev/null | grep -q -- '--no-tablespaces' && extra+=(--no-tablespaces)
+  err="$(mktemp)"
+  if MYSQL_PWD="$db_pass" mysqldump --single-transaction --quick "${extra[@]}" \
+      -h "${db_host:-127.0.0.1}" -P "${db_port:-3306}" -u "$db_user" "$db_name" 2>"$err" \
       | gzip > "$file"; then
     find "${backup_dir}" -maxdepth 1 -name '*.sql.gz' -printf '%T@ %p\n' 2>/dev/null \
       | sort -rn | tail -n "+$((keep + 1))" | cut -d' ' -f2- | xargs -r rm -f
     ok "Sauvegarde DB effectuée (${keep} conservées)"
   else
     log "⚠️  Sauvegarde DB échouée, déploiement poursuivi quand même"
+    [ -s "$err" ] && head -n 3 "$err" | cut -c1-300 | sed 's/^/    mysqldump : /'
     rm -f "$file"
   fi
+  rm -f "$err"
 }
