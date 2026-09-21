@@ -11,7 +11,9 @@ for f in "$DIR"/test_*.sh; do
   for fn in $fns; do
     TOTAL=$((TOTAL + 1))
     T="$(mktemp -d)"; mkdir -p "$T/bin"
-    out="$(cd "$T" && T="$T" PATH="$T/bin:$PATH" bash -c "set -e; source '$DIR/lib.sh'; source '$f'; $fn" 2>&1)"; rc=$?
+    # Hermétique : en CI GitHub, GITHUB_OUTPUT & co. sont définis et détourneraient
+    # les sorties des scripts (plan.sh écrit dans $GITHUB_OUTPUT s'il existe).
+    out="$(cd "$T" && env -u GITHUB_OUTPUT -u GITHUB_ENV -u GITHUB_STEP_SUMMARY -u GITHUB_PATH T="$T" PATH="$T/bin:$PATH" bash -c "set -e; source '$DIR/lib.sh'; source '$f'; $fn" 2>&1)"; rc=$?
     if [ $rc -eq 0 ]; then echo "  ✓ ${fn#test_}"
     elif [ $rc -eq 99 ]; then echo "  - ${fn#test_} (ignoré : prérequis absent)"; SKIPPED=$((SKIPPED + 1))
     else echo "  ✗ ${fn#test_}"; printf '%s\n' "$out" | sed 's/^/      /'; FAILED=$((FAILED + 1)); fi
