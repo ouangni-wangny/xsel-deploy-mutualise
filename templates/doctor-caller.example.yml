@@ -1,0 +1,22 @@
+# À copier dans le projet : .github/workflows/doctor.yml
+# Lancement manuel (onglet Actions → Doctor → Run workflow). Ne déploie rien.
+name: Doctor
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/doctor.yml@v1.3.0
+    with:
+      app_path: backend
+      deploy_path: /home/UTILISATEUR/public_html/api.example.com
+      health_check_url: https://api.example.com/up
+    secrets:
+      SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+      SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+      SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}

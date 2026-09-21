@@ -1,0 +1,55 @@
+name: Résoudre le PHP du serveur
+description: >
+  Choisit le binaire PHP CLI du serveur (alt-php CloudLinux, ea-php cPanel ou
+  php du PATH) sans que le projet connaisse les chemins, puis exporte
+  RESOLVED_PHP_BIN et RESOLVED_PHP_VERSION pour les étapes suivantes. Nécessite
+  la connexion SSH ouverte par l'action ssh-setup.
+inputs:
+  host:
+    required: true
+    description: Hôte SSH
+  port:
+    required: true
+    description: Port SSH
+  user:
+    required: true
+    description: Utilisateur SSH
+  php_bin:
+    required: false
+    default: auto
+    description: Binaire PHP imposé (auto = déduit)
+  php_version:
+    required: false
+    default: ""
+    description: Version PHP imposée (ex. 8.4)
+  min_php:
+    required: false
+    default: ""
+    description: PHP minimal exigé par composer.json
+  domain:
+    required: false
+    default: ""
+    description: Domaine servi (pour suivre la version PHP cPanel du vhost)
+runs:
+  using: composite
+  steps:
+    - name: Résoudre le binaire PHP côté serveur
+      shell: bash
+      env:
+        SSH_HOST: ${{ inputs.host }}
+        SSH_PORT: ${{ inputs.port }}
+        SSH_USER: ${{ inputs.user }}
+        PHP_BIN_INPUT: ${{ inputs.php_bin }}
+        PHP_VERSION_INPUT: ${{ inputs.php_version }}
+        MIN_PHP: ${{ inputs.min_php }}
+        DOMAIN: ${{ inputs.domain }}
+        SCRIPT: ${{ github.action_path }}/../../../scripts/resolve-php.sh
+      run: |
+        set -o pipefail
+        OUT="$(ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" -o StrictHostKeyChecking=yes \
+          "$SSH_USER@$SSH_HOST" \
+          "PHP_BIN_INPUT='${PHP_BIN_INPUT}' PHP_VERSION_INPUT='${PHP_VERSION_INPUT}' MIN_PHP='${MIN_PHP}' DOMAIN='${DOMAIN}' bash -s" \
+          < "$SCRIPT")" || { echo "$OUT"; exit 1; }
+        echo "$OUT" | grep -v '^php_\(bin\|version\)='
+        echo "RESOLVED_PHP_BIN=$(echo "$OUT" | sed -n 's/^php_bin=//p')" >> "$GITHUB_ENV"
+        echo "RESOLVED_PHP_VERSION=$(echo "$OUT" | sed -n 's/^php_version=//p')" >> "$GITHUB_ENV"

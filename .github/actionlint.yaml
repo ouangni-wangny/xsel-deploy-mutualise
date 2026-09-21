@@ -1,0 +1,11 @@
+# job.workflow_repository / job.workflow_sha existent bel et bien dans les
+# workflows réutilisables (docs.github.com → Contexts reference → job context)
+# mais le schéma embarqué d'actionlint ne les connaît pas encore : faux positif.
+# À retirer quand actionlint sera à jour.
+paths:
+  .github/workflows/deploy.yml:
+    ignore:
+      - 'property "workflow_(repository|sha)" is not defined in object type'
+  .github/workflows/doctor.yml:
+    ignore:
+      - 'property "workflow_(repository|sha)" is not defined in object type'

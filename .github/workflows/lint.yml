@@ -29,3 +29,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: shellcheck
         run: shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh
+
+  # Tests des scripts serveur et des actions (faux uapi/selectorctl/mysqldump,
+  # serveur PHP local) : tests/run.sh, bash pur, aucune dépendance.
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Suite de tests
+        run: bash tests/run.sh

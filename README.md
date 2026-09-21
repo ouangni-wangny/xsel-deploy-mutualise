@@ -33,14 +33,14 @@ côté serveur, healthcheck.
 
 | Input | Requis | Défaut | Description |
 |---|---|---|---|
-| `stack` | **oui** | — | `laravel` ou `nextjs-passenger` |
+| `stack` | non | `auto` | `auto` (détecté : `laravel/framework` dans composer.json, `next` dans package.json), `laravel` ou `nextjs-passenger` |
 | `deploy_path` | **oui** | — | Chemin absolu sur le serveur où le code est déployé directement (pas de `releases/`, voir ADR-0002) |
 | `app_path` | non | `.` | Sous-dossier du repo appelant contenant cette app. Laisser `.` si le repo entier est l'app (cas multi-repo) |
 | `health_check_url` | non | `""` | URL publique vérifiée après déploiement. Fortement recommandé — sans ça, un déploiement cassé ne se signale nulle part |
-| `php_version` | non | `8.3` | Version PHP utilisée pour le **build CI** (Vite), pas forcément celle du serveur |
-| `node_version` | non | `20` | Version Node utilisée pour le build CI |
+| `php_version` | non | *(vide = déduite)* | Stack `laravel` : version PHP du build **et** du serveur. Vide : PHP cPanel du domaine si compatible, sinon la plus basse version installée qui satisfait `composer.json` |
+| `node_version` | non | *(vide = détectée)* | Stack `nextjs-passenger` : `.nvmrc` / `.node-version` / `engines.node`, sinon 22 |
 | `build_frontend_assets` | non | `true` | Stack `laravel` uniquement : lance `npm run build` (Vite) avant déploiement |
-| `php_bin` | non | `php` | Stack `laravel` : chemin du binaire PHP **côté serveur** (voir [CloudLinux](#cloudlinux--cagefs)) |
+| `php_bin` | non | `auto` | Stack `laravel` : binaire PHP **côté serveur**. `auto` : résolu (alt-php CloudLinux, ea-php cPanel, `php` du PATH) — à n'imposer qu'en cas d'ambiguïté (voir [CloudLinux](#cloudlinux--cagefs)) |
 | `composer_on_server` | non | `false` | Stack `laravel` : `false` = dépendances construites par le CI et livrées (recommandé) ; `true` = `composer install` sur le serveur |
 | `environment` | non | `production` | Environment GitHub du déploiement ; y configurer l'approbation manuelle (Settings → Environments) |
 | `manage_web_php` | non | `true` | Stack `laravel` : aligne la version PHP du domaine (cPanel MultiPHP, via `uapi`) sur `php_bin` ; `false` = ne pas y toucher |
@@ -228,10 +228,18 @@ nano /home/<user>/<app>/.env
   cPanel génère lui-même un `.htaccess` à cette étape — ne jamais le
   committer ni le modifier à la main, le workflow le protège déjà.
 
-### 7. Ajouter le workflow appelant
+### 7. Diagnostiquer le serveur, puis ajouter le workflow appelant
 
-Copier [`templates/caller-workflow.example.yml`](templates/caller-workflow.example.yml),
-adapter selon la [référence des inputs](#inputs) ci-dessus.
+**Avant** le premier déploiement, copier
+[`templates/doctor-caller.example.yml`](templates/doctor-caller.example.yml) dans
+le projet et lancer *Actions → Doctor → Run workflow*. Il ne déploie rien : il
+vérifie SSH, les PHP installés (CLI et web), les extensions, `.env`,
+`APP_DEBUG`, les sauvegardes… et affiche le bloc `with:` à coller.
+
+Puis copier [`templates/caller-workflow.example.yml`](templates/caller-workflow.example.yml).
+Le minimum se réduit à trois entrées (`app_path`, `deploy_path`,
+`health_check_url`) : le reste est détecté. Référence complète des
+[inputs](#inputs) ci-dessus.
 
 ### 8. Ajouter le monitoring (recommandé)
 
@@ -309,7 +317,15 @@ Conçu par ADR, validé en conditions réelles sur PECI (plusieurs incidents
 rencontrés et corrigés en direct — voir les ADR et l'historique des
 commits). Versions taguées :
 
-- **`v1.2.0`** (courant) — durcissement : actions épinglées par SHA (+
+- **`v1.3.0`** (courant) — *convention plutôt que configuration* : `stack`,
+  `php_version`, `php_bin`, `node_version` et extensions PHP sont détectés ;
+  nouveau workflow **`doctor`** (diagnostic serveur en lecture seule + config
+  suggérée) ; le kit est récupéré **à la version exacte du workflow appelé**
+  (`job.workflow_sha`) ; suite de tests (`tests/`) exécutée en CI ; corrige
+  deux bugs de `common.sh` (sauvegarde DB avortant le déploiement si
+  `DB_PORT` absent, tableau vide sous bash < 4.4). Voir
+  [ADR-0009](docs/adr/0009-convention-doctor-tests.md).
+- **`v1.2.0`** — durcissement : actions épinglées par SHA (+
   Dependabot), `permissions: contents: read`, entrée `environment` (défaut
   `production`) pour l'approbation manuelle côté dépôt. Voir
   [ADR-0008](docs/adr/0008-supply-chain-hardening.md).

@@ -20,9 +20,10 @@ jobs:
 
   deploy:
     needs: ci
-    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@v1.2.0
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@v1.3.0
     with:
-      stack: laravel
+      # stack, php_version, php_bin, extensions PHP, Node : détectés
+      # automatiquement (surchargeables — voir la référence des inputs).
       deploy_path: /home/xselcpaneluser/api.exemple.com
       health_check_url: https://api.exemple.com/up
     secrets:
@@ -52,7 +53,7 @@ jobs:
 
   deploy:
     needs: ci
-    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@v1.2.0
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@v1.3.0
     with:
       stack: laravel
       app_path: backend
@@ -91,7 +92,7 @@ jobs:
 
   deploy:
     needs: ci
-    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@v1.2.0
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@v1.3.0
     with:
       stack: nextjs-passenger
       app_path: frontend

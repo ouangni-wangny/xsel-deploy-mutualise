@@ -1,0 +1,72 @@
+name: SSH setup (connexion partagée)
+description: >
+  Installe la clé de déploiement, enregistre la host key (une seule connexion)
+  et ouvre une connexion SSH maître réutilisée par toutes les étapes suivantes
+  (ssh ET rsync -e ssh) — voir ADR-0006. Retry avec attente croissante ; un refus
+  d'authentification n'est pas retenté.
+inputs:
+  host:
+    description: Hôte SSH
+    required: true
+  port:
+    description: Port SSH
+    required: true
+  user:
+    description: Utilisateur SSH
+    required: true
+  private_key:
+    description: Clé privée de déploiement (sans passphrase)
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Configurer la clé et la connexion SSH partagée
+      shell: bash
+      env:
+        SSH_PRIVATE_KEY: ${{ inputs.private_key }}
+        SSH_HOST: ${{ inputs.host }}
+        SSH_PORT: ${{ inputs.port }}
+        SSH_USER: ${{ inputs.user }}
+      run: |
+        set -uo pipefail
+        umask 077
+        mkdir -p ~/.ssh/cm
+        printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+        chmod 600 ~/.ssh/deploy_key
+
+        # Host key : un seul type (donc une seule connexion) ; le client ssh
+        # choisit l'algorithme présent dans known_hosts. Repli sur le type
+        # suivant seulement si le serveur n'expose pas le précédent.
+        KEYS="$(mktemp)"
+        for t in ed25519 ecdsa rsa; do
+          ssh-keyscan -T 15 -t "$t" -p "$SSH_PORT" -H "$SSH_HOST" > "$KEYS" 2>/dev/null || true
+          [ -s "$KEYS" ] && break
+        done
+        if [ ! -s "$KEYS" ]; then
+          echo "::error::host key introuvable sur ${SSH_HOST}:${SSH_PORT} — serveur injoignable, SSH_HOST/SSH_PORT erronés, ou connexions limitées par un pare-feu (IP du runner bloquée)"
+          exit 1
+        fi
+        cat "$KEYS" >> ~/.ssh/known_hosts
+
+        # Toutes les étapes suivantes réutilisent la même connexion TCP. Un
+        # master perdu est recréé automatiquement.
+        cat >> ~/.ssh/config <<EOF2
+        Host $SSH_HOST
+          ConnectTimeout 20
+          ServerAliveInterval 15
+          ServerAliveCountMax 4
+          ControlMaster auto
+          ControlPath $HOME/.ssh/cm/%C
+          ControlPersist 30m
+        EOF2
+
+        # Connexion maître, avec retry/backoff pour les blocages temporaires.
+        for i in 1 2 3 4; do
+          OUT="$(ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" -o StrictHostKeyChecking=yes -o BatchMode=yes \
+            "$SSH_USER@$SSH_HOST" true 2>&1)" && { echo "connexion SSH établie (essai $i)"; exit 0; }
+          echo "$OUT"
+          case "$OUT" in *"Permission denied"*|*"Host key verification failed"*) break ;; esac
+          [ "$i" -lt 4 ] && { echo "::warning::connexion SSH échouée (essai $i/4), nouvel essai dans $((i * 20))s"; sleep $((i * 20)); }
+        done
+        echo "::error::impossible d'ouvrir la connexion SSH vers ${SSH_USER}@${SSH_HOST}:${SSH_PORT}"
+        exit 1

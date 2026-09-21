@@ -12,6 +12,8 @@
 # Variables d'environnement :
 #   PHP_BIN          binaire PHP CLI de déploiement (requis)
 #   REQUIRED_EXTS    extensions requises, séparées par des espaces (peut être vide)
+#   CHECK_ONLY       "1" : diagnostic seul (aucune activation, sort toujours en 0) —
+#                    utilisé par le workflow doctor
 #
 # Codes de sortie : 0 = tout est présent (éventuellement après activation),
 #                   1 = il manque encore des extensions (message explicite).
@@ -46,6 +48,11 @@ if [ "$#" -eq 0 ]; then
 fi
 
 MISSING="$(missing_exts "$PHP_BIN" "$@")"
+
+if [ -n "$MISSING" ] && [ "${CHECK_ONLY:-}" = "1" ]; then
+  echo "extensions PHP manquantes pour ${PHP_BIN} : ${MISSING} (diagnostic : rien n'est activé ; un déploiement tentera selectorctl)"
+  exit 0
+fi
 
 if [ -n "$MISSING" ]; then
   VER="$("$PHP_BIN" -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null)"

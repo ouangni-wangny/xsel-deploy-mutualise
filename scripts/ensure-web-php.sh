@@ -25,6 +25,7 @@
 # Variables d'environnement :
 #   PHP_BIN   binaire PHP CLI de déploiement (requis)
 #   DOMAIN    domaine/sous-domaine servi (vhost cPanel) ; vide = ignoré
+#   CHECK_ONLY "1" : diagnostic seul (ne modifie ni cPanel ni .htaccess) — workflow doctor
 # =============================================================================
 set -uo pipefail
 
@@ -61,6 +62,16 @@ if [ -z "$HAVE" ]; then
 fi
 
 # 1) Réglage cPanel (userdata du vhost).
+if [ "${CHECK_ONLY:-}" = "1" ]; then
+  DOCROOT="$(vhost_field documentroot)"
+  echo "PHP web : ${DOMAIN} déclaré ${HAVE} dans cPanel (attendu ${WANT}) — docroot ${DOCROOT:-?}"
+  if [ -f "${DOCROOT}/.htaccess" ] && grep -q "application/x-httpd-${WANT} " "${DOCROOT}/.htaccess" 2>/dev/null; then
+    echo "  .htaccess : handler ${WANT} présent"
+  else
+    echo "  .htaccess : handler ${WANT} ABSENT — un déploiement le (ré)installera"
+  fi
+  exit 0
+fi
 if [ "$HAVE" != "$WANT" ]; then
   echo "PHP web : ${DOMAIN} déclaré ${HAVE}, attendu ${WANT} (php_bin) — alignement via cPanel MultiPHP"
   uapi LangPHP php_set_vhost_versions version="$WANT" vhost="$DOMAIN" 2>&1 | sed 's/^/  uapi : /' | head -n 20

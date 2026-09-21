@@ -35,7 +35,7 @@ health_check() {
         return 0
         ;;
     esac
-    sleep 3
+    sleep "${HEALTH_RETRY_DELAY:-3}"
   done
   echo "❌ Healthcheck KO après 5 tentatives (dernier code HTTP : ${code:-aucun})" >&2
   health_diagnose "$url" "$log_dir" >&2
@@ -120,12 +120,12 @@ backup_database() {
       printf -v "$v" '%s' "$(printf '%s' "${!v}" | base64 -d 2>/dev/null || true)"
     done
   else
-    db_conn="$(grep -m1 '^DB_CONNECTION=' "$env_file" | cut -d= -f2-)"
-    db_host="$(grep -m1 '^DB_HOST=' "$env_file" | cut -d= -f2-)"
-    db_port="$(grep -m1 '^DB_PORT=' "$env_file" | cut -d= -f2-)"
-    db_name="$(grep -m1 '^DB_DATABASE=' "$env_file" | cut -d= -f2-)"
-    db_user="$(grep -m1 '^DB_USERNAME=' "$env_file" | cut -d= -f2-)"
-    db_pass="$(grep -m1 '^DB_PASSWORD=' "$env_file" | cut -d= -f2- | sed 's/^"\(.*\)"$/\1/')"
+    db_conn="$(grep -m1 '^DB_CONNECTION=' "$env_file" | cut -d= -f2- || true)"
+    db_host="$(grep -m1 '^DB_HOST=' "$env_file" | cut -d= -f2- || true)"
+    db_port="$(grep -m1 '^DB_PORT=' "$env_file" | cut -d= -f2- || true)"
+    db_name="$(grep -m1 '^DB_DATABASE=' "$env_file" | cut -d= -f2- || true)"
+    db_user="$(grep -m1 '^DB_USERNAME=' "$env_file" | cut -d= -f2- || true)"
+    db_pass="$(grep -m1 '^DB_PASSWORD=' "$env_file" | cut -d= -f2- | sed 's/^"\(.*\)"$/\1/' || true)"
   fi
   case "$db_conn" in
     mysql|mariadb) ;;
@@ -142,11 +142,11 @@ backup_database() {
   local extra=() err
   mysqldump --help 2>/dev/null | grep -q -- '--no-tablespaces' && extra+=(--no-tablespaces)
   err="$(mktemp)"
-  if MYSQL_PWD="$db_pass" mysqldump --single-transaction --quick "${extra[@]}" \
+  if MYSQL_PWD="$db_pass" mysqldump --single-transaction --quick ${extra[@]+"${extra[@]}"} \
       -h "${db_host:-127.0.0.1}" -P "${db_port:-3306}" -u "$db_user" "$db_name" 2>"$err" \
       | gzip > "$file"; then
     find "${backup_dir}" -maxdepth 1 -name '*.sql.gz' -printf '%T@ %p\n' 2>/dev/null \
-      | sort -rn | tail -n "+$((keep + 1))" | cut -d' ' -f2- | xargs -r rm -f
+      | sort -rn | tail -n "+$((keep + 1))" | cut -d' ' -f2- | xargs -r rm -f || true
     ok "Sauvegarde DB effectuée (${keep} conservées)"
   else
     log "⚠️  Sauvegarde DB échouée, déploiement poursuivi quand même"
