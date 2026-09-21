@@ -1,0 +1,9 @@
+version: 2
+updates:
+  # Met à jour les actions épinglées par SHA (et le kit xsel-deploy-mutualise)
+  # via des pull requests hebdomadaires — l'épinglage ne doit pas figer les
+  # correctifs de sécurité.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

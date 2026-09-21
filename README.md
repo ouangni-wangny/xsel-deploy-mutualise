@@ -42,6 +42,7 @@ côté serveur, healthcheck.
 | `build_frontend_assets` | non | `true` | Stack `laravel` uniquement : lance `npm run build` (Vite) avant déploiement |
 | `php_bin` | non | `php` | Stack `laravel` : chemin du binaire PHP **côté serveur** (voir [CloudLinux](#cloudlinux--cagefs)) |
 | `composer_on_server` | non | `false` | Stack `laravel` : `false` = dépendances construites par le CI et livrées (recommandé) ; `true` = `composer install` sur le serveur |
+| `environment` | non | `production` | Environment GitHub du déploiement ; y configurer l'approbation manuelle (Settings → Environments) |
 | `manage_web_php` | non | `true` | Stack `laravel` : aligne la version PHP du domaine (cPanel MultiPHP, via `uapi`) sur `php_bin` ; `false` = ne pas y toucher |
 | `php_extensions` | non | *(vide)* | Stack `laravel` : extensions PHP supplémentaires à exiger/activer (`intl,gd`), en plus de celles de `composer.lock` |
 | `composer_bin` | non | `composer` | Stack `laravel`, seulement si `composer_on_server: true` : chemin du binaire composer côté serveur |
@@ -308,7 +309,11 @@ Conçu par ADR, validé en conditions réelles sur PECI (plusieurs incidents
 rencontrés et corrigés en direct — voir les ADR et l'historique des
 commits). Versions taguées :
 
-- **`v1.1.2`** (courant) — le handler PHP du domaine est réinstallé dans le
+- **`v1.2.0`** (courant) — durcissement : actions épinglées par SHA (+
+  Dependabot), `permissions: contents: read`, entrée `environment` (défaut
+  `production`) pour l'approbation manuelle côté dépôt. Voir
+  [ADR-0008](docs/adr/0008-supply-chain-hardening.md).
+- **`v1.1.2`** — le handler PHP du domaine est réinstallé dans le
   `.htaccess` après chaque transfert (le rsync l'effaçait : site en PHP hérité
   du parent, HTTP 500) ; diagnostic de la version web réellement exécutée.
 - **`v1.1.1`** — aligne la version PHP du domaine (MultiPHP, entrée

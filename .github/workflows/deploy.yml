@@ -59,6 +59,16 @@ on:
         required: false
         type: boolean
         default: false
+      environment:
+        description: >
+          Nom de l'Environment GitHub du job de déploiement (défaut
+          "production"). C'est là qu'on configure, côté dépôt (Settings →
+          Environments), l'approbation manuelle avant déploiement et la
+          restriction des branches. Sans règle configurée, le déploiement
+          part comme avant.
+        required: false
+        type: string
+        default: "production"
       manage_web_php:
         description: >
           Stack laravel — true (défaut) : aligne la version PHP du domaine
@@ -110,10 +120,14 @@ on:
       SSH_PRIVATE_KEY:
         required: true
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     name: Build & deploy (${{ inputs.stack }})
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
     timeout-minutes: 20
     # Deux déploiements simultanés vers le même deploy_path (ex. un push et
     # un workflow_dispatch qui se chevauchent) pourraient interleaver leurs
@@ -132,7 +146,7 @@ jobs:
           esac
 
       - name: Checkout du projet appelant
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           path: app
 
@@ -143,7 +157,7 @@ jobs:
       # voir ADR-0004. À revisiter si ça devient un problème en pratique
       # (ex. en dupliquant le ref en input explicite `kit_ref`).
       - name: Checkout xsel-deploy-mutualise (scripts serveur, toujours main)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: ouangni-wangny/xsel-deploy-mutualise
           ref: main
@@ -178,7 +192,7 @@ jobs:
 
       - name: Setup PHP
         if: inputs.stack == 'laravel'
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: ${{ inputs.php_version }}
           extensions: ${{ env.REQUIRED_EXTS_CSV }}
@@ -187,7 +201,7 @@ jobs:
 
       - name: Setup Node (build assets Laravel)
         if: inputs.stack == 'laravel' && inputs.build_frontend_assets
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ inputs.node_version }}
           cache: 'npm'
@@ -225,7 +239,7 @@ jobs:
       # ---------------------------------------------------------------------
       - name: Setup Node
         if: inputs.stack == 'nextjs-passenger'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ inputs.node_version }}
           cache: 'npm'
