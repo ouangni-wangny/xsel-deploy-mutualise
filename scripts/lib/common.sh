@@ -12,6 +12,9 @@
 # =============================================================================
 set -euo pipefail
 
+# Dossier de ce fichier (pour retrouver read-db-env.php à côté).
+COMMON_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 log()  { echo "▶ $*"; }
 ok()   { echo "✅ $*"; }
 die()  { echo "❌ $*" >&2; exit 1; }
@@ -70,19 +73,27 @@ backup_database() {
   command -v mysqldump >/dev/null 2>&1 || { log "mysqldump indisponible, sauvegarde DB ignorée"; return 0; }
   [ -f "$env_file" ] || { log ".env introuvable, sauvegarde DB ignorée"; return 0; }
 
-  local db_conn
-  db_conn="$(grep -m1 '^DB_CONNECTION=' "$env_file" | cut -d= -f2-)"
+  local db_conn db_host db_port db_name db_user db_pass fields
+  # Lecture via phpdotenv (fidèle au parsing de Laravel) ; repli grep/cut si
+  # vendor/ ou PHP indisponible.
+  if fields="$("${PHP_BIN:-php}" "${COMMON_LIB_DIR}/read-db-env.php" "$(dirname "$env_file")" 2>/dev/null)" \
+      && [ "$(printf '%s\n' "$fields" | wc -l | tr -d ' ')" -eq 6 ]; then
+    { read -r db_conn; read -r db_host; read -r db_port; read -r db_name; read -r db_user; read -r db_pass; } <<< "$fields"
+    for v in db_conn db_host db_port db_name db_user db_pass; do
+      printf -v "$v" '%s' "$(printf '%s' "${!v}" | base64 -d 2>/dev/null || true)"
+    done
+  else
+    db_conn="$(grep -m1 '^DB_CONNECTION=' "$env_file" | cut -d= -f2-)"
+    db_host="$(grep -m1 '^DB_HOST=' "$env_file" | cut -d= -f2-)"
+    db_port="$(grep -m1 '^DB_PORT=' "$env_file" | cut -d= -f2-)"
+    db_name="$(grep -m1 '^DB_DATABASE=' "$env_file" | cut -d= -f2-)"
+    db_user="$(grep -m1 '^DB_USERNAME=' "$env_file" | cut -d= -f2-)"
+    db_pass="$(grep -m1 '^DB_PASSWORD=' "$env_file" | cut -d= -f2- | sed 's/^"\(.*\)"$/\1/')"
+  fi
   case "$db_conn" in
     mysql|mariadb) ;;
     *) log "DB_CONNECTION=${db_conn:-?}, sauvegarde ignorée (mysql/mariadb uniquement)"; return 0 ;;
   esac
-
-  local db_host db_port db_name db_user db_pass
-  db_host="$(grep -m1 '^DB_HOST=' "$env_file" | cut -d= -f2-)"
-  db_port="$(grep -m1 '^DB_PORT=' "$env_file" | cut -d= -f2-)"
-  db_name="$(grep -m1 '^DB_DATABASE=' "$env_file" | cut -d= -f2-)"
-  db_user="$(grep -m1 '^DB_USERNAME=' "$env_file" | cut -d= -f2-)"
-  db_pass="$(grep -m1 '^DB_PASSWORD=' "$env_file" | cut -d= -f2- | sed 's/^"\(.*\)"$/\1/')"
 
   mkdir -p "$backup_dir"
   local file

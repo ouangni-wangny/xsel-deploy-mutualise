@@ -42,6 +42,7 @@ côté serveur, healthcheck.
 | `build_frontend_assets` | non | `true` | Stack `laravel` uniquement : lance `npm run build` (Vite) avant déploiement |
 | `php_bin` | non | `php` | Stack `laravel` : chemin du binaire PHP **côté serveur** (voir [CloudLinux](#cloudlinux--cagefs)) |
 | `composer_on_server` | non | `false` | Stack `laravel` : `false` = dépendances construites par le CI et livrées (recommandé) ; `true` = `composer install` sur le serveur |
+| `manage_web_php` | non | `true` | Stack `laravel` : aligne la version PHP du domaine (cPanel MultiPHP, via `uapi`) sur `php_bin` ; `false` = ne pas y toucher |
 | `php_extensions` | non | *(vide)* | Stack `laravel` : extensions PHP supplémentaires à exiger/activer (`intl,gd`), en plus de celles de `composer.lock` |
 | `composer_bin` | non | `composer` | Stack `laravel`, seulement si `composer_on_server: true` : chemin du binaire composer côté serveur |
 | `build_env` | non | `""` | Variables exposées pendant le build, une par ligne `KEY=VALUE`. **Obligatoire** pour tout `NEXT_PUBLIC_*` (figé au build, jamais relu au runtime) |
@@ -307,7 +308,10 @@ Conçu par ADR, validé en conditions réelles sur PECI (plusieurs incidents
 rencontrés et corrigés en direct — voir les ADR et l'historique des
 commits). Versions taguées :
 
-- **`v1.1.0`** (courant) — *build once* : `composer install` sur le runner,
+- **`v1.1.1`** (courant) — aligne la version PHP du domaine (MultiPHP, entrée
+  `manage_web_php`) ; healthcheck avec diagnostic ; sauvegarde DB fiable
+  (lecture du `.env` via phpdotenv, `--no-tablespaces`).
+- **`v1.1.0`** — *build once* : `composer install` sur le runner,
   `vendor/` livré avec le code (nouvelle entrée `composer_on_server`, défaut
   `false`) ; extensions PHP déduites de `composer.lock`, vérifiées et
   activées via `selectorctl` avant le transfert (`php_extensions` pour en

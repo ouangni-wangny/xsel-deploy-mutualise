@@ -59,6 +59,16 @@ on:
         required: false
         type: boolean
         default: false
+      manage_web_php:
+        description: >
+          Stack laravel — true (défaut) : aligne la version PHP du domaine
+          (cPanel MultiPHP, via uapi) sur php_bin avant le déploiement ; le
+          PHP CLI et le PHP web sont deux réglages distincts et un décalage
+          donne un HTTP 500 après un déploiement pourtant « réussi ». Ne fait
+          rien hors cPanel ou sans health_check_url. false = ne jamais y toucher.
+        required: false
+        type: boolean
+        default: true
       php_extensions:
         description: >
           Stack laravel — extensions PHP supplémentaires à exiger/activer sur
@@ -160,7 +170,7 @@ jobs:
               jq -r '(.require // {}) | keys[]' composer.json 2>/dev/null
               jq -r '(.packages // [])[] | (.require // {}) | keys[]' composer.lock 2>/dev/null
               printf '%s\n' "$EXTRA_EXTS" | tr ',' '\n' | sed 's/^ *//;s/ *$//;s/^/ext-/'
-            } | grep '^ext-' | sed 's/^ext-//' | tr '[:upper:]' '[:lower:]' | sort -u | tr '\n' ' '
+            } | grep '^ext-' | sed 's/^ext-//' | sed '/^$/d' | tr '[:upper:]' '[:lower:]' | sort -u | tr '\n' ' '
           )"
           echo "extensions requises : ${EXTS:-aucune}"
           echo "REQUIRED_EXTS=${EXTS% }" >> "$GITHUB_ENV"
@@ -374,6 +384,18 @@ jobs:
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
             "PHP_BIN='${{ inputs.php_bin }}' REQUIRED_EXTS='${REQUIRED_EXTS:-}' bash -s" \
             < deploy-kit/scripts/ensure-php-extensions.sh
+
+      - name: Aligner la version PHP du serveur web (MultiPHP)
+        if: inputs.stack == 'laravel' && inputs.manage_web_php && inputs.health_check_url != ''
+        env:
+          HEALTH_URL: ${{ inputs.health_check_url }}
+        run: |
+          DOMAIN="${HEALTH_URL#*://}"
+          DOMAIN="${DOMAIN%%[/:?]*}"
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=yes \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "PHP_BIN='${{ inputs.php_bin }}' DOMAIN='${DOMAIN}' bash -s" \
+            < deploy-kit/scripts/ensure-web-php.sh
 
       - name: Déployer le code sur le serveur (écrase en place)
         # --delete réactivé, mais avec des exclusions protégées : sans ça,

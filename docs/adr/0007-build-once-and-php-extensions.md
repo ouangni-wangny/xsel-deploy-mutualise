@@ -32,6 +32,16 @@ composer.
   l'utilisateur), sinon échec explicite **avant tout transfert**. Un
   avertissement (non bloquant) signale les extensions absentes du PHP web
   `ea-phpXY`, que le selector ne pilote pas.
+- **PHP web aligné** (`scripts/ensure-web-php.sh`, entrée `manage_web_php`,
+  défaut `true`) : le PHP CLI (`php_bin`) et le PHP qui sert le domaine
+  (cPanel MultiPHP) sont indépendants ; un décalage produit un HTTP 500 après
+  un déploiement « réussi » (cas SIS : `platform_check` « requires PHP >= 8.3 »).
+  Le script lit la version du vhost (`uapi LangPHP php_get_vhost_versions`),
+  l'aligne si besoin (`php_set_vhost_versions`) et ne bloque jamais.
+- **Échecs lisibles** : `health_check` affiche le code HTTP, le début de la
+  réponse et les dernières lignes `.ERROR:` de Laravel ; la sauvegarde DB lit
+  le `.env` avec phpdotenv (le parseur de Laravel) au lieu de `grep/cut`, et
+  affiche l'erreur de `mysqldump`.
 - Les scripts serveur restent tirés de `main` (ADR-0004) ; `deploy-laravel.sh`
   garde `COMPOSER_ON_SERVER=true` par défaut pour ne pas casser les workflows
   appelants épinglés sur une version antérieure.
