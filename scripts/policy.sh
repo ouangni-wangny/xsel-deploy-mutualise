@@ -49,7 +49,7 @@ if [ -d "$REPO_DIR/.github/workflows" ]; then
             warn "le kit est épinglé sur ${v} alors que ${KIT_LATEST} est disponible (ou passer à @${KIT_LATEST%%.*} pour suivre automatiquement)"
           fi
         else
-          warn "le kit est référencé par « @${v} » (branche) : utilisez un tag (@${KIT_LATEST%%.*}v1…) ou un SHA pour des déploiements reproductibles"
+          warn "le kit est référencé par « @${v} » (une branche) : utilisez un tag flottant (@v1), un tag précis (@v1.5.0) ou un SHA pour des déploiements reproductibles"
         fi
       done
 fi

@@ -18,6 +18,7 @@ TITLE="${NOTIFY_TITLE:-Échec CI/CD}"
 BODY="${NOTIFY_BODY:-}"
 TEXT="${TITLE}"$'\n'"${BODY}"
 SENT=0
+echo "message : ${TITLE}"
 
 if [ -n "${NOTIFY_WEBHOOK_URL:-}" ]; then
   PAYLOAD="$(jq -n --arg t "$TEXT" '{text: $t, content: $t}')"
