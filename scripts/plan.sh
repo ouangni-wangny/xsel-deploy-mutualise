@@ -76,20 +76,15 @@ APPS="$(jq -c 'def d(x): if . == null then x else . end;
     composer_on_server: ($v.composer_on_server | d(false)),
     composer_bin: ($v.composer_bin | d("composer")),
     manage_web_php: ($v.manage_web_php | d(true)),
-    build_frontend_assets: $v.build_frontend_assets,
+    build_frontend_assets: ($v.build_frontend_assets | d(false)),
     node_version: (($v.node_version | d("")) | tostring),
     build_env: (($v.build_env | d({})) | if type=="object" then to_entries | map("\(.key)=\(.value)") | join("\n") else . end),
     protect_paths: (($v.protect_paths | d([])) | if type=="array" then join("\n") else . end)
   })' <<<"$CFG")"
 
-# build_frontend_assets par défaut : true seulement si l'app a un package.json
-# avec un script build (Laravel + Vite) ; une API sans package.json -> false.
-BUILD_MAP="{}"
-for p in $(jq -r '.[].path' <<<"$APPS"); do
-  if [ -f "$REPO_DIR/$p/package.json" ] && jq -e '.scripts.build // empty' "$REPO_DIR/$p/package.json" >/dev/null 2>&1; then bfa=true; else bfa=false; fi
-  BUILD_MAP="$(jq -c --arg p "$p" --argjson b "$bfa" '. + {($p): $b}' <<<"$BUILD_MAP")"
-done
-APPS="$(jq -c --argjson m "$BUILD_MAP" 'map(.build_frontend_assets = (if .build_frontend_assets == null then $m[.path] else .build_frontend_assets end))' <<<"$APPS")"
+# build_frontend_assets : false par défaut. Le squelette Laravel embarque toujours
+# un package.json avec `vite build`, même pour une API JSON : le détecter comme
+# « assets à compiler » serait un faux positif fréquent → activation explicite.
 
 # --- Fichiers modifiés
 ALL=false

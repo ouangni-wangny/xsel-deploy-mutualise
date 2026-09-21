@@ -95,8 +95,9 @@ test_valeurs_par_defaut_et_normalisation() {
   be="$(echo "$OUT" | sed -n 's/^deploy_apps=//p' | jq -c '.[0]')"; fe="$(echo "$OUT" | sed -n 's/^deploy_apps=//p' | jq -c '.[1]')"
   assert_eq "$(jq -r .path <<<"$be")" "backend"; assert_eq "$(jq -r .php_bin <<<"$be")" "auto"
   assert_eq "$(jq -r .manage_web_php <<<"$be")" "true"; assert_eq "$(jq -r .composer_on_server <<<"$be")" "false"
-  assert_eq "$(jq -r .build_frontend_assets <<<"$be")" "false"     # pas de package.json
-  assert_eq "$(jq -r .build_frontend_assets <<<"$fe")" "true"      # package.json avec script build
+  # false par défaut, même avec un package.json + script build (squelette Laravel/Vite d'une API)
+  assert_eq "$(jq -r .build_frontend_assets <<<"$be")" "false"
+  assert_eq "$(jq -r .build_frontend_assets <<<"$fe")" "false"
   assert_eq "$(jq -r .build_env <<<"$fe")" "NEXT_PUBLIC_API_URL=https://api.ex.com/v1"
 }
 test_valeurs_explicites_l_emportent() {
@@ -112,13 +113,14 @@ apps:
     php_extensions: [intl, gd]
     composer_on_server: true
     manage_web_php: false
-    build_frontend_assets: false
+    build_frontend_assets: true
     protect_paths: [public/uploads, custom]
 Y
   git add -A; git commit -q -m m; plan workflow_dispatch REF=refs/heads/main
   a="$(echo "$OUT" | sed -n 's/^deploy_apps=//p' | jq -c '.[0]')"
   assert_eq "$(jq -r .php_version <<<"$a")" "8.4"; assert_eq "$(jq -r .php_extensions <<<"$a")" "intl,gd"
   assert_eq "$(jq -r .composer_on_server <<<"$a")" "true"; assert_eq "$(jq -r .manage_web_php <<<"$a")" "false"
+  assert_eq "$(jq -r .build_frontend_assets <<<"$a")" "true"
   assert_eq "$(jq -r .protect_paths <<<"$a")" $'public/uploads\ncustom'
 }
 test_erreurs_de_manifeste_explicites() {

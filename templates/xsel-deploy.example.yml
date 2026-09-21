@@ -23,7 +23,7 @@ apps:
     # php_extensions: [intl, gd]          # en plus de celles de composer.lock
     # composer_on_server: false           # true : composer install sur le serveur (ancien mode)
     # manage_web_php: true                # false : ne jamais toucher au PHP du domaine (cPanel)
-    # build_frontend_assets: false        # défaut : true seulement si package.json a un script build
+    # build_frontend_assets: true         # Laravel + Blade/Vite : compiler les assets (défaut : false, API JSON)
     # protect_paths: [public/uploads]     # protégés de rsync --delete (.env, storage/ le sont déjà)
 
   frontend:
