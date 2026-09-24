@@ -34,6 +34,13 @@ jobs:
     # @v1 : tag flottant (dernière version 1.x.y qui a passé les tests du kit).
     # Pour figer : @v1.4.0 (ou un SHA de commit).
     uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/pipeline.yml@v1
-    # Secrets attendus dans le projet : DEPLOY_SSH_HOST, DEPLOY_SSH_PORT,
-    # DEPLOY_SSH_USER, DEPLOY_SSH_PRIVATE_KEY.
-    secrets: inherit
+    # Secrets passés un par un : « secrets: inherit » ne transmet rien à un
+    # workflow réutilisable d'un autre propriétaire (le kit est chez ouangni-wangny).
+    secrets:
+      DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+      DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+      DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      NOTIFY_WEBHOOK_URL: ${{ secrets.NOTIFY_WEBHOOK_URL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

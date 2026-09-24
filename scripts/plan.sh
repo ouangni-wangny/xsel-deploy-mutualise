@@ -55,7 +55,7 @@ jq -r '.apps | to_entries[] | select((.value.deploy_path // "") != "") | select(
 KNOWN_APP='["path","stack","deploy","deploy_path","health_check_url","ci","database","lint","php_version","php_bin","php_extensions","composer_on_server","composer_bin","manage_web_php","build_frontend_assets","node_version","build_env","protect_paths","provision"]'
 jq -r --argjson known "$KNOWN_APP" '.apps | to_entries[] | . as $a | ($a.value | keys[]) | select(. as $k | $known | index($k) | not) | "\($a.key): clé inconnue « \(.) »"' <<<"$CFG" \
   | while read -r m; do echo "::warning::${MANIFEST} — ${m}"; done
-jq -r '(keys[]) | select(. as $k | ["version","apps","environment","deploy_branch","monitor"] | index($k) | not) | "clé inconnue « \(.) »"' <<<"$CFG" \
+jq -r '(keys[]) | select(. as $k | ["version","apps","environment","deploy_branch","monitor","policy"] | index($k) | not) | "clé inconnue « \(.) »"' <<<"$CFG" \
   | while read -r m; do echo "::warning::${MANIFEST} — ${m}"; done
 
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-$(jq -r '.deploy_branch // "main"' <<<"$CFG")}"

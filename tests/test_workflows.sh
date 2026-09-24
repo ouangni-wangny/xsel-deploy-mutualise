@@ -84,3 +84,21 @@ test_le_deploiement_est_sequentiel_et_attend_la_ci() {
   blk="$(awk '/^  deploy:/{f=1} f' "$WF/pipeline.yml" | awk 'NR>1 && /^  [a-z]+:$/ {exit} {print}')"
   assert_contains "$blk" "max-parallel: 1"; assert_contains "$blk" "needs: [plan, ci]"; assert_contains "$blk" "needs.ci.result == 'success'"
 }
+test_la_conformite_bloque_le_plan_sauf_doctor_et_provision() {
+  blk="$(step_block "$WF/pipeline.yml" "Conformité du projet")"
+  [ -n "$blk" ] || fail "étape « Conformité du projet » introuvable"
+  assert_contains "$blk" 'PROJECT_REPO: ${{ github.repository }}'     # secrets-inherit : propriétaire réel du projet
+  assert_contains "$blk" "github.event.inputs.action == 'doctor'"
+  assert_contains "$blk" "github.event.inputs.action == 'provision'"
+  assert_not_contains "$blk" "continue-on-error"
+}
+test_le_deploiement_protege_les_dossiers_cpanel() {
+  # Incident Univers Gravure évité de justesse : rsync --delete effaçait /.well-known (AutoSSL).
+  blk="$(step_block "$ACT/deploy-app/action.yml" "Déployer le code sur le serveur")"
+  assert_contains "$blk" "--exclude=/.well-known"; assert_contains "$blk" "--exclude=/cgi-bin"
+}
+test_la_ci_laravel_impose_la_base_de_test_a_phpunit() {
+  # Incident Univers Gravure : <env DB_DATABASE> de phpunit.xml visait une base absente.
+  blk="$(step_block "$ACT/ci-app/action.yml" "Préparer l'environnement de test Laravel")"
+  assert_contains "$blk" 'echo "DB_DATABASE=ci"'; assert_contains "$blk" '>> "$GITHUB_ENV"'
+}

@@ -35,5 +35,8 @@ apps:
       NEXT_PUBLIC_API_URL: https://api.example.com/api/v1
     # node_version: "22"                  # défaut : .nvmrc / engines.node, sinon 22
 
+# policy:
+#   ignore: [laravel-htaccess]   # règles de conformité à ne pas appliquer (ADR-0012), à justifier en revue
+
 # monitor:
 #   urls: [https://api.example.com/up, https://example.com]   # défaut : les health_check_url

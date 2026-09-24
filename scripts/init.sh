@@ -11,6 +11,12 @@
 # SSH dédiée, et pose les 4 secrets GitHub avec `gh`. Il ne pose AUCUNE question
 # (100 % pilotable par options) et n'écrit jamais de clé privée dans le dépôt.
 #
+# Conformité (règles de scripts/conform.sh, les mêmes que le pipeline, ADR-0012) :
+#   init.sh --check          contrôle seul, n'écrit rien ; code 1 s'il reste une erreur bloquante
+#   init.sh --fix            initialise si besoin, puis corrige tout ce qui est corrigeable
+#   … --json                 rapport de conformité JSON sur stdout (le reste sur stderr) :
+#                            pour un agent IA ou un outil. Même usage, dev ou agent.
+#
 # Options :
 #   --dir DIR          racine du projet (défaut .)
 #   --repo OWNER/NOM   dépôt GitHub des secrets (défaut : `gh repo view`)
@@ -21,11 +27,12 @@
 #   --kit-ref REF      référence du kit dans cicd.yml (défaut v1)
 #   --force            écrase cicd.yml / .xsel-deploy.yml existants
 #   --dry-run          n'écrit et ne pose RIEN : affiche seulement ce qui serait fait
+#   --check | --fix | --json   voir « Conformité » ci-dessus
 # =============================================================================
 set -uo pipefail
 
 DIR="."; REPO=""; SSH_USER=""; SSH_HOST=""; SSH_PORT=""; KEY_FILE=""
-GEN_KEY=0; SET_SECRETS=0; KIT_REF="v1"; FORCE=0; DRY=0
+GEN_KEY=0; SET_SECRETS=0; KIT_REF="v1"; FORCE=0; DRY=0; CHECK=0; FIX=0; JSON=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --dir) DIR="$2"; shift 2 ;;            --repo) REPO="$2"; shift 2 ;;
@@ -33,19 +40,38 @@ while [ $# -gt 0 ]; do
     --port) SSH_PORT="$2"; shift 2 ;;      --key-file) KEY_FILE="$2"; shift 2 ;;
     --generate-key) GEN_KEY=1; shift ;;    --set-secrets) SET_SECRETS=1; shift ;;
     --kit-ref) KIT_REF="$2"; shift 2 ;;    --force) FORCE=1; shift ;;
-    --dry-run) DRY=1; shift ;;
-    -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --dry-run) DRY=1; shift ;;             --check) CHECK=1; shift ;;
+    --fix) FIX=1; shift ;;                 --json) JSON=1; shift ;;
+    -h|--help) sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "option inconnue : $1 (voir --help)" >&2; exit 2 ;;
   esac
 done
 
+# Avec --json, stdout est réservé au rapport JSON : les messages passent sur stderr.
+if [ "$JSON" -eq 1 ]; then exec 3>&1 1>&2; else exec 3>&1; fi
 say()  { echo "$*"; }
 step() { echo; echo "▶ $*"; }
 act()  { if [ "$DRY" -eq 1 ]; then echo "  [dry-run] $*"; else echo "  ✓ $*"; fi; }
 
+# conform.sh : à côté de ce script, ou téléchargé à la même version du kit
+# (cas `bash <(curl …/init.sh)`, où aucun fichier voisin n'existe).
+conform() {
+  local c; c="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/conform.sh"
+  if [ ! -f "$c" ]; then
+    c="$(mktemp)"
+    curl -fsSL "https://raw.githubusercontent.com/ouangni-wangny/xsel-deploy-mutualise/${KIT_REF}/scripts/conform.sh" -o "$c" \
+      || { echo "conform.sh introuvable (téléchargement impossible)" >&2; return 2; }
+  fi
+  local args=(); [ "$JSON" -eq 1 ] && args+=(--json)
+  bash "$c" ${args[@]+"${args[@]}"} "$@" >&3
+}
+
 command -v jq >/dev/null || { echo "jq est requis" >&2; exit 1; }
 [ -d "$DIR" ] || { echo "dossier introuvable : $DIR" >&2; exit 1; }
 cd "$DIR" || exit 1
+
+# --- Contrôle seul : rien n'est écrit ----------------------------------------
+if [ "$CHECK" -eq 1 ]; then conform; exit $?; fi
 
 # --- 1. Détection des apps ---------------------------------------------------
 step "Détection des applications"
@@ -111,7 +137,16 @@ permissions:
 jobs:
   pipeline:
     uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/pipeline.yml@${KIT_REF}
-    secrets: inherit
+    # Secrets passés un par un : « secrets: inherit » ne transmet rien à un
+    # workflow réutilisable d'un autre propriétaire.
+    secrets:
+      DEPLOY_SSH_HOST: \${{ secrets.DEPLOY_SSH_HOST }}
+      DEPLOY_SSH_PORT: \${{ secrets.DEPLOY_SSH_PORT }}
+      DEPLOY_SSH_USER: \${{ secrets.DEPLOY_SSH_USER }}
+      DEPLOY_SSH_PRIVATE_KEY: \${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      NOTIFY_WEBHOOK_URL: \${{ secrets.NOTIFY_WEBHOOK_URL }}
+      TELEGRAM_BOT_TOKEN: \${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: \${{ secrets.TELEGRAM_CHAT_ID }}
 Y
 
 # --- 3. Clé SSH ---------------------------------------------------------------
@@ -147,7 +182,13 @@ if [ "$SET_SECRETS" -eq 1 ]; then
   set_secret DEPLOY_SSH_USER "$SSH_USER"; set_secret DEPLOY_SSH_PRIVATE_KEY "@${KEY_PATH}"
 fi
 
-# --- 5. Suite -------------------------------------------------------------------
+# --- 5. Conformité -------------------------------------------------------------
+step "Conformité du projet"
+RC=0
+if [ "$FIX" -eq 1 ] && [ "$DRY" -eq 0 ]; then conform --fix; RC=$?
+else conform --no-enforce; fi   # simple information, sauf avec --fix
+
+# --- 6. Suite -------------------------------------------------------------------
 step "Prochaines étapes"
 cat <<N
   1. Adaptez .xsel-deploy.yml (deploy_path, health_check_url).
@@ -156,5 +197,7 @@ cat <<N
   3. Commitez .xsel-deploy.yml et .github/workflows/cicd.yml, poussez.
   4. Actions → CI/CD → Run workflow → action: doctor   (diagnostic du serveur, ne déploie rien)
   5. Nouvelle app ? action: provision (base + .env), puis un push sur main déploie.
+  Conformité : « init.sh --check » (contrôle) · « init.sh --fix » (corrige) — le pipeline
+  refuse de déployer tant qu'une erreur bloquante reste.
 N
-exit 0
+exit "$RC"

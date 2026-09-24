@@ -305,7 +305,9 @@ runs:
       # toujours protégés ; protect_paths ajoute les cas projet.
       shell: bash
       run: |
-        EXCLUDES=(--exclude=.deploy-scripts --exclude=.backups)
+        # /.well-known (validation AutoSSL du certificat) et /cgi-bin : créés par
+        # cPanel à la racine du domaine ; les effacer casse le renouvellement TLS.
+        EXCLUDES=(--exclude=.deploy-scripts --exclude=.backups --exclude=/.well-known --exclude=/cgi-bin)
         if [ "$STACK" = "laravel" ]; then
           EXCLUDES+=(--exclude=.env --exclude=storage --exclude=public/storage)
         fi

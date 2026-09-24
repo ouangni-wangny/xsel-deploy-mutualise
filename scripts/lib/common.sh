@@ -101,19 +101,11 @@ web_php_evidence() {
   fi
 }
 
-# Dump la base MySQL/MariaDB décrite par un .env Laravel avant une migration.
-# N'échoue jamais le déploiement si la sauvegarde échoue (mysqldump absent,
-# etc.) — la migration reste l'objectif principal, la sauvegarde est un
-# filet de sécurité, pas un pré-requis bloquant.
-backup_database() {
-  local env_file="$1" backup_dir="$2" keep="${3:-5}"
-
-  command -v mysqldump >/dev/null 2>&1 || { log "mysqldump indisponible, sauvegarde DB ignorée"; return 0; }
-  [ -f "$env_file" ] || { log ".env introuvable, sauvegarde DB ignorée"; return 0; }
-
-  local db_conn db_host db_port db_name db_user db_pass fields
-  # Lecture via phpdotenv (fidèle au parsing de Laravel) ; repli grep/cut si
-  # vendor/ ou PHP indisponible.
+# read_db_env <chemin/.env> : pose db_conn db_host db_port db_name db_user db_pass
+# (variables de l'appelant, à déclarer `local`). Lecture via phpdotenv (fidèle au
+# parsing de Laravel) ; repli grep/cut si vendor/ ou PHP indisponible.
+read_db_env() {
+  local env_file="$1" fields
   if fields="$("${PHP_BIN:-php}" "${COMMON_LIB_DIR}/read-db-env.php" "$(dirname "$env_file")" 2>/dev/null)" \
       && [ "$(printf '%s\n' "$fields" | wc -l | tr -d ' ')" -eq 6 ]; then
     { read -r db_conn; read -r db_host; read -r db_port; read -r db_name; read -r db_user; read -r db_pass; } <<< "$fields"
@@ -128,6 +120,16 @@ backup_database() {
     db_user="$(grep -m1 '^DB_USERNAME=' "$env_file" | cut -d= -f2- || true)"
     db_pass="$(grep -m1 '^DB_PASSWORD=' "$env_file" | cut -d= -f2- | sed 's/^"\(.*\)"$/\1/' || true)"
   fi
+}
+
+backup_database() {
+  local env_file="$1" backup_dir="$2" keep="${3:-5}"
+
+  command -v mysqldump >/dev/null 2>&1 || { log "mysqldump indisponible, sauvegarde DB ignorée"; return 0; }
+  [ -f "$env_file" ] || { log ".env introuvable, sauvegarde DB ignorée"; return 0; }
+
+  local db_conn db_host db_port db_name db_user db_pass
+  read_db_env "$env_file"
   case "$db_conn" in
     mysql|mariadb) ;;
     *) log "DB_CONNECTION=${db_conn:-?}, sauvegarde ignorée (mysql/mariadb uniquement)"; return 0 ;;

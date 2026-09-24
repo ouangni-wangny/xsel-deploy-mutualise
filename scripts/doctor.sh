@@ -14,6 +14,22 @@ set +u
 
 section() { echo; echo "── $* ──"; }
 
+# Moteur par défaut du serveur MySQL/MariaDB : les mutualisés sont souvent en
+# MyISAM (index limités à 1000 octets → migrations en échec, ni clés étrangères
+# ni transactions). Incident Univers Gravure ; règle conform.sh « moteur-innodb ».
+db_engine_check() {
+  local db_conn db_host db_port db_name db_user db_pass cli engine
+  read_db_env "$1"
+  case "$db_conn" in mysql|mariadb) ;; *) return 0 ;; esac
+  cli="$(command -v mariadb || command -v mysql)" || { echo "moteur MySQL par défaut : client mysql absent, non vérifié"; return 0; }
+  engine="$(MYSQL_PWD="$db_pass" "$cli" -N -B -h "${db_host:-127.0.0.1}" -P "${db_port:-3306}" -u "$db_user" "$db_name" \
+    -e 'SELECT @@default_storage_engine' 2>/dev/null)" || { echo "moteur MySQL par défaut : connexion à la base impossible (identifiants du .env ?)"; return 0; }
+  echo "moteur MySQL par défaut : ${engine}"
+  if [ "$(printf '%s' "$engine" | tr '[:lower:]' '[:upper:]')" != "INNODB" ]; then
+    echo "⚠️  les tables seraient créées en ${engine} : imposer InnoDB dans config/database.php ('engine' => env('DB_ENGINE', 'InnoDB')) — init.sh --fix le fait"
+  fi
+}
+
 section "Serveur"
 echo "utilisateur : $(id -un) — $(uname -sr)"
 if [ -d "$DEPLOY_PATH" ]; then
@@ -48,6 +64,7 @@ if [ "$STACK" = "laravel" ]; then
     case "$dbg" in true|TRUE|1) echo "⚠️  APP_DEBUG actif : à désactiver en production (fuite de configuration dans les erreurs)";; esac
     [ -f "${DEPLOY_PATH}/vendor/autoload.php" ] && echo "vendor/ : présent" || echo "vendor/ : absent (livré au déploiement)"
     [ -w "${DEPLOY_PATH}/storage" ] && echo "storage/ : inscriptible" || echo "storage/ : NON inscriptible"
+    db_engine_check "${DEPLOY_PATH}/.env"
     newest="$(ls -t "${DEPLOY_PATH}"/.backups/db/*.sql.gz 2>/dev/null | head -n 1)"
     [ -n "$newest" ] && echo "dernière sauvegarde DB : ${newest##*/}" || echo "sauvegardes DB : aucune"
   fi

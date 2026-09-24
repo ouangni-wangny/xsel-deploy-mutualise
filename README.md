@@ -67,6 +67,25 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ouangni-wangny/xsel-deploy-m
 cPanel, et pose les 4 secrets. Il ne pose aucune question ; `--dry-run` montre
 ce qui serait fait sans rien écrire.
 
+### Mettre un projet en conformité : `init.sh --fix`
+
+Le pipeline **refuse de lancer la CI et le déploiement** tant qu'une règle
+bloquante n'est pas respectée ; le résumé du run liste chaque problème et sa
+correction. À la racine du projet, par un développeur **ou un agent IA** :
+
+```bash
+K=https://raw.githubusercontent.com/ouangni-wangny/xsel-deploy-mutualise/v1/scripts/init.sh
+bash <(curl -fsSL $K) --check          # contrôle seul, n'écrit rien (code 1 si bloquant)
+bash <(curl -fsSL $K) --fix            # corrige tout ce qui est corrigeable, puis : git diff, commit
+bash <(curl -fsSL $K) --fix --json     # idem, rapport JSON sur stdout (agents, outillage)
+```
+
+Règles (identifiant, niveau, correction automatique) : [ADR-0012](docs/adr/0012-conformite-projet-bloquante.md).
+Exemples bloquants : `secrets: inherit` vers le kit depuis un autre compte GitHub,
+`output: "standalone"` absent, suite PHPUnit vers un dossier absent, `.env`
+versionné, lockfile absent. Une règle se désactive explicitement dans le
+manifeste : `policy: { ignore: [laravel-htaccess] }`.
+
 Ensuite, depuis l'onglet Actions (*CI/CD → Run workflow*) :
 1. **`action: doctor`** : diagnostic du serveur (ne déploie rien).
 2. **`action: provision`** (app Laravel fraîche) : crée la base MySQL et son
@@ -84,9 +103,12 @@ Ensuite, depuis l'onglet Actions (*CI/CD → Run workflow*) :
 - **Notifications d'échec** (optionnelles) via secrets : `NOTIFY_WEBHOOK_URL`
   (Slack / Discord) et/ou `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`. Sans secret,
   rien n'est envoyé. Jamais sur `pull_request`.
-- **Politiques** (avertissements) : `.env` versionné dans git, `health_check_url`
-  en `http://`, kit référencé par une branche ou épinglé sur une version en retard.
-  `deploy_path` non absolu ou contenant `..` : erreur bloquante.
+- **Conformité du projet** (bloquante, [ADR-0012](docs/adr/0012-conformite-projet-bloquante.md)) :
+  voir [`init.sh --fix`](#mettre-un-projet-en-conformité--initsh---fix). Non bloquante
+  pour `doctor` et `provision`. `deploy_path` non absolu ou contenant `..` : erreur bloquante.
+- **Dossiers cPanel protégés** : `/.well-known` (validation AutoSSL) et `/cgi-bin`
+  ne sont jamais effacés par `rsync --delete`.
+- **`doctor`** signale un serveur MySQL/MariaDB en MyISAM par défaut.
 
 `@v1` est un tag **flottant** (dernière version 1.x.y dont les tests ont
 passé, déplacé par [`release.yml`](.github/workflows/release.yml)) : les
@@ -398,7 +420,13 @@ Conçu par ADR, validé en conditions réelles sur PECI (plusieurs incidents
 rencontrés et corrigés en direct — voir les ADR et l'historique des
 commits). Versions taguées :
 
-- **`v1.5.0`** (courant) — action **`provision`** (base MySQL + utilisateur +
+- **`v1.6.0`** (courant) — **conformité du projet bloquante** et corrigeable :
+  `scripts/conform.sh` (source unique des règles), `init.sh --check / --fix / --json`
+  (dev ou agent IA), résumé du run avec corrections, `policy.ignore` ; `/.well-known`
+  et `/cgi-bin` protégés au déploiement ; base de test CI prioritaire sur
+  `phpunit.xml` ; `doctor` contrôle le moteur MySQL ; `cicd.yml` généré sans
+  `secrets: inherit`. Voir [ADR-0012](docs/adr/0012-conformite-projet-bloquante.md).
+- **`v1.5.0`** — action **`provision`** (base MySQL + utilisateur +
   `.env` de production via `uapi`, idempotent), commande **`init.sh`**,
   monitoring du certificat TLS, notifications d'échec (webhook / Telegram),
   résumé de déploiement, politiques (`.env` versionné, http, kit en retard),

@@ -1,11 +1,17 @@
-# policy.sh (avertissements) et validation du deploy_path (plan.sh)
+# policy.sh (conformité au format GitHub, via conform.sh) et validation du deploy_path (plan.sh)
 proj() { git init -q "$T/p" && cd "$T/p" && git config user.email t@t && git config user.name t && mkdir -p backend .github/workflows
+  printf 'version: 2\nupdates: []\n' > .github/dependabot.yml
   printf 'version: 1\napps:\n  backend:\n    deploy_path: /home/u/api\n    health_check_url: %s\n' "${1:-https://api.ex.com/up}" > .xsel-deploy.yml; }
 pol() { run env REPO_DIR="$T/p" "$@" bash "$REPO/scripts/policy.sh"; }
 
-test_avertit_si_env_est_versionne() {
+test_env_versionne_est_bloquant() {
   proj; echo "APP_KEY=x" > backend/.env; git add -A; git commit -q -m m
-  pol; assert_eq "$RC" 0; assert_contains "$OUT" "backend/.env est versionné"
+  pol; assert_eq "$RC" 1; assert_contains "$OUT" "::error::conformité [env-versionne] backend : backend/.env est versionné"
+}
+test_sans_enforce_une_erreur_n_echoue_pas() {
+  # doctor / provision : ne déploient rien, l'erreur reste visible mais non bloquante
+  proj; echo "APP_KEY=x" > backend/.env; git add -A; git commit -q -m m
+  pol ENFORCE=false; assert_eq "$RC" 0; assert_contains "$OUT" "::warning::conformité [env-versionne]"
 }
 test_silencieux_si_projet_sain() {
   proj; echo "APP_KEY=" > backend/.env.example; printf 'backend/.env\n' > .gitignore; git add -A; git commit -q -m m

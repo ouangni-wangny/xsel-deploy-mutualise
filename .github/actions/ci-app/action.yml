@@ -98,6 +98,11 @@ runs:
         if [ "$DATABASE" = "mysql" ]; then
           set_env DB_CONNECTION mysql; set_env DB_HOST 127.0.0.1; set_env DB_PORT 3306
           set_env DB_DATABASE ci; set_env DB_USERNAME root; set_env DB_PASSWORD password
+          # Aussi dans l'environnement du job : le <env> de phpunit.xml (ex.
+          # DB_DATABASE=monapp_test) l'emporte sur .env, mais jamais sur une variable
+          # déjà définie — sans ça, les tests visent une base qui n'existe pas.
+          { echo "DB_CONNECTION=mysql"; echo "DB_HOST=127.0.0.1"; echo "DB_PORT=3306"
+            echo "DB_DATABASE=ci"; echo "DB_USERNAME=root"; echo "DB_PASSWORD=password"; } >> "$GITHUB_ENV"
         fi
         php artisan key:generate --ansi
         php artisan package:discover --ansi

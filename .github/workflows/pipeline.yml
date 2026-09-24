@@ -83,15 +83,19 @@ jobs:
           ONLY_APPS: ${{ github.event.inputs.apps }}
         run: bash deploy-kit/scripts/plan.sh
 
-      # Bonnes pratiques du projet : avertissements seulement (jamais bloquant).
-      # Pas à chaque passage du cron de monitoring : ce serait du bruit.
-      - name: Politiques (bonnes pratiques du projet)
+      # Conformité du projet (scripts/conform.sh, ADR-0012) : une erreur fait
+      # échouer ce job, donc ni CI ni déploiement ; le résumé du run liste les
+      # corrections (init.sh --fix). doctor/provision ne déploient rien : erreurs
+      # non bloquantes. Pas à chaque passage du cron de monitoring (bruit).
+      - name: Conformité du projet
         if: github.event_name != 'schedule'
         env:
           REPO_DIR: app
           MANIFEST: ${{ inputs.manifest }}
           GH_TOKEN: ${{ github.token }}
           KIT_REPO: ${{ job.workflow_repository }}
+          PROJECT_REPO: ${{ github.repository }}
+          ENFORCE: ${{ !(github.event_name == 'workflow_dispatch' && (github.event.inputs.action == 'doctor' || github.event.inputs.action == 'provision')) }}
         run: |
           KIT_LATEST="$(gh api "repos/${KIT_REPO}/releases/latest" --jq .tag_name 2>/dev/null || true)"
           export KIT_LATEST

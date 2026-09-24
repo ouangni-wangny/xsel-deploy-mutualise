@@ -29,7 +29,8 @@ sans alerte, et un échec de déploiement ne prévenait personne.
    (`text` + `content`) et/ou Telegram, via secrets optionnels ; uniquement si un
    job a échoué, hors `pull_request` ; un échec d'envoi n'échoue jamais le job ;
    URL et jetons jamais affichés.
-5. **Politiques** (`policy.sh`, avertissements seulement) : `.env` versionné,
+5. **Politiques** (`policy.sh`, avertissements seulement — *remplacé par
+   [ADR-0012](0012-conformite-projet-bloquante.md) : conformité bloquante et corrigeable*) : `.env` versionné,
    `health_check_url` en http, kit référencé par une branche ou épinglé sur une
    version en retard. Seul un `deploy_path` dangereux (relatif ou avec `..`) est
    bloquant, car `rsync --delete` en dépend.
