@@ -14,10 +14,10 @@ connexions par IP (pare-feu CSF/LFD, fail2ban, `MaxStartups`, règles
 réseau…). Le symptôme est trompeur : les premières connexions passent, les
 suivantes ne reçoivent **aucune réponse** (`ssh: connect to host … Connection
 timed out`, exit 255, ~2 min de blocage) — pas un refus, donc pas un problème
-de clé, de port ou de host key. Cas vécu sur SIS (serveur Namecheap
+de clé, de port ou de host key. Cas vécu sur un projet (serveur mutualisé
 `*.hostns.io`) : `ssh-keyscan` + `mkdir` passaient, le préflight time-out ;
 un test `ssh-keyscan` en boucle depuis un poste reproduisait le blocage dès
-la 3e tentative et le port restait fermé plusieurs minutes. PECI, sur un
+la 3e tentative et le port restait fermé plusieurs minutes. Le projet pilote, sur un
 autre serveur, n'était pas concerné.
 
 Les hébergeurs cibles du kit sont divers ; la correction doit donc être

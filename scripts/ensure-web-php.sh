@@ -6,7 +6,7 @@
 # préflight. Le PHP en ligne de commande (php_bin) et le PHP qui sert le site
 # (cPanel → MultiPHP Manager, par domaine) sont deux réglages distincts : un
 # déploiement peut réussir en CLI puis renvoyer HTTP 500 parce que le domaine
-# tourne encore sur une version plus ancienne (cas vécu sur SIS : composer
+# tourne encore sur une version plus ancienne (cas vécu : composer
 # platform_check « requires PHP >= 8.3 » alors que le CLI était en 8.4).
 #
 # Ce script aligne le PHP du domaine sur celui de php_bin, via l'API cPanel
@@ -14,7 +14,7 @@
 # « cPanel-generated handler » dans le .htaccess du document root : c'est ce
 # bloc que MultiPHP écrit pour appliquer la version, et un déploiement rsync
 # qui écrase le .htaccess (versionné dans le repo) le supprime — le domaine
-# retombe alors sur le PHP hérité du dossier parent (cas SIS : uapi annonçait
+# retombe alors sur le PHP hérité du dossier parent (cas vécu : uapi annonçait
 # ea-php84 mais le site tournait en 8.1 hérité de public_html/.htaccess).
 # À exécuter APRÈS le transfert du code, à chaque déploiement (idempotent).
 #

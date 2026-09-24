@@ -93,12 +93,12 @@ test_la_conformite_bloque_le_plan_sauf_doctor_et_provision() {
   assert_not_contains "$blk" "continue-on-error"
 }
 test_le_deploiement_protege_les_dossiers_cpanel() {
-  # Incident Univers Gravure évité de justesse : rsync --delete effaçait /.well-known (AutoSSL).
+  # Incident évité de justesse : rsync --delete effaçait /.well-known (AutoSSL).
   blk="$(step_block "$ACT/deploy-app/action.yml" "Déployer le code sur le serveur")"
   assert_contains "$blk" "--exclude=/.well-known"; assert_contains "$blk" "--exclude=/cgi-bin"
 }
 test_la_ci_laravel_impose_la_base_de_test_a_phpunit() {
-  # Incident Univers Gravure : <env DB_DATABASE> de phpunit.xml visait une base absente.
+  # Incident vécu : <env DB_DATABASE> de phpunit.xml visait une base absente.
   blk="$(step_block "$ACT/ci-app/action.yml" "Préparer l'environnement de test Laravel")"
   assert_contains "$blk" 'echo "DB_DATABASE=ci"'; assert_contains "$blk" '>> "$GITHUB_ENV"'
 }

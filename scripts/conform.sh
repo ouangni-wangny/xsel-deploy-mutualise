@@ -135,7 +135,7 @@ for wf in .github/workflows/*.yml .github/workflows/*.yaml; do
   done <<<"$refs"
 
   # secrets: inherit ne transmet RIEN à un workflow réutilisable d'un autre
-  # propriétaire (incident Univers Gravure : secrets SSH vides au déploiement).
+  # propriétaire (incident vécu : secrets SSH vides au déploiement).
   kit_owner="$(head -n 1 <<<"$refs" | cut -d/ -f1)"
   if grep -qE '^[[:space:]]*secrets:[[:space:]]*inherit[[:space:]]*$' "$wf" \
      && [ -n "$PROJECT_OWNER" ] && [ "$PROJECT_OWNER" != "$kit_owner" ]; then

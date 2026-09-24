@@ -4,7 +4,7 @@
 Accepté (2026-09-24). Remplace le point 5 d'ADR-0011 (politiques en avertissements seulement).
 
 ## Contexte
-L'intégration d'Univers Gravure (monorepo Laravel + Next.js, dépôt chez un autre
+L'intégration d'un nouveau projet (monorepo Laravel + Next.js, dépôt chez un autre
 propriétaire que le kit) a buté sur des manques **du projet**, chacun découvert
 tard, parfois en production :
 
@@ -66,7 +66,7 @@ tard, parfois en production :
 
 ## Conséquences
 - Un projet non conforme ne déploie plus ; la correction tient en une commande.
-- Les projets existants (PECI, SIS, Univers Gravure) ont été contrôlés avant la
+- Les projets existants (les trois en production) ont été contrôlés avant la
   publication : aucune erreur bloquante, seulement des avertissements.
 - Ajouter une règle = une fonction dans `conform.sh` + un test dans
   `tests/test_conform.sh`. Une nouvelle règle **bloquante** peut arrêter les

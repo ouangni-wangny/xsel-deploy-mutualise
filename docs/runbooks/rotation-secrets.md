@@ -12,7 +12,7 @@ Variables utilisées ci-dessous :
 R=owner/depot            # dépôt GitHub du projet
 U=utilisateur-cpanel     # DEPLOY_SSH_USER
 H=serveur.example.com    # DEPLOY_SSH_HOST
-P=21098                  # DEPLOY_SSH_PORT
+P=PORT_SSH               # DEPLOY_SSH_PORT
 APP=/home/$U/chemin/app  # deploy_path de l'app Laravel concernée
 ```
 

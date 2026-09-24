@@ -32,7 +32,7 @@ permissions:
 jobs:
   pipeline:
     # @v1 : tag flottant (dernière version 1.x.y qui a passé les tests du kit).
-    # Pour figer : @v1.4.0 (ou un SHA de commit).
+    # Pour figer : @v1.7.0 (ou un SHA de commit).
     uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/pipeline.yml@v1
     # Secrets passés un par un : « secrets: inherit » ne transmet rien à un
     # workflow réutilisable d'un autre propriétaire (le kit est chez ouangni-wangny).

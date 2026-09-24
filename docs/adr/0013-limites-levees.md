@@ -5,7 +5,7 @@ Accepté (2026-09-24). Complète ADR-0002, ADR-0011 et ADR-0012.
 
 ## Contexte
 La section « limites connues » du README listait des manques devenus coûteux à
-l'usage (Univers Gravure, MIACI) ou déjà corrigés sans être retirés.
+l'usage (nouveaux projets) ou déjà corrigés sans être retirés.
 
 ## Décision
 1. **Retirés de la liste** : le rollback automatisé — fonctionnalité **non souhaitée**
@@ -17,7 +17,7 @@ l'usage (Univers Gravure, MIACI) ou déjà corrigés sans être retirés.
    `node_version`, sinon 22 ; refus explicite si indisponible), sinon
    `uapi PassengerApps register_application`, sinon instructions. Domaine = hôte de
    `health_check_url`. Idempotent : une app existante n'est jamais modifiée.
-   Format de `cloudlinux-selector get --json` relevé sur le serveur Namecheap.
+   Format de `cloudlinux-selector get --json` relevé sur un serveur CloudLinux réel.
 3. **`protect_paths` automatique** (`plan.sh`) : une app dont le `deploy_path` est
    sous celui d'une autre est ajoutée aux `protect_paths` de la parente (ordre
    conservé, sans doublon, affiché dans les logs).

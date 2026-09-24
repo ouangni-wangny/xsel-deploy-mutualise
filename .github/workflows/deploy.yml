@@ -41,7 +41,7 @@ on:
         type: string
         default: ""
       health_check_url:
-        description: "URL publique à vérifier après déploiement (ex. https://api.peci.org/up) — optionnel mais recommandé"
+        description: "URL publique à vérifier après déploiement (ex. https://api.example.com/up) — optionnel mais recommandé"
         required: false
         type: string
         default: ""

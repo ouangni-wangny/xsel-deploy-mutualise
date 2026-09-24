@@ -41,6 +41,6 @@ sans alerte, et un échec de déploiement ne prévenait personne.
 - Une app Laravel neuve se met en service sans SSH manuel : `init`, `doctor`,
   `provision`, puis push. Le premier `.env` n'est plus à composer à la main.
 - `provision` suppose un cPanel avec `uapi` (validé sur le serveur LiteSpeed/CloudLinux
-  de SIS) ; ailleurs il avertit et crée le `.env` sans base.
+  du projet pilote) ; ailleurs il avertit et crée le `.env` sans base.
 - Les notifications ne sont pas validées sur un vrai canal (tests sur récepteur local).
 - La clé privée générée par `init.sh` vit dans `~/.ssh` de la machine du développeur.

@@ -16,7 +16,7 @@ section() { echo; echo "── $* ──"; }
 
 # Moteur par défaut du serveur MySQL/MariaDB : les mutualisés sont souvent en
 # MyISAM (index limités à 1000 octets → migrations en échec, ni clés étrangères
-# ni transactions). Incident Univers Gravure ; règle conform.sh « moteur-innodb ».
+# ni transactions). Incident vécu ; règle conform.sh « moteur-innodb ».
 db_engine_check() {
   local db_conn db_host db_port db_name db_user db_pass cli engine
   read_db_env "$1"

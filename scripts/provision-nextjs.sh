@@ -6,7 +6,7 @@
 # `provision`. Prépare UNE FOIS une app Next.js (Passenger) : crée le dossier et
 # déclare l'application Node — ce qui se faisait à la main dans cPanel → Setup
 # Node.js App :
-#   - CloudLinux (Namecheap…) : `cloudlinux-selector create` (version de Node choisie) ;
+#   - CloudLinux : `cloudlinux-selector create` (version de Node choisie) ;
 #   - cPanel sans CloudLinux  : `uapi PassengerApps register_application` (Node du système) ;
 #   - ni l'un ni l'autre      : instructions pour le faire dans cPanel.
 #

@@ -37,7 +37,7 @@ touch "${DEPLOY_PATH}/tmp/restart.txt"
 sleep 2
 
 if [ -n "$HEALTH_CHECK_URL" ]; then
-  health_check "$HEALTH_CHECK_URL" || die "Déploiement terminé mais healthcheck KO — le code est en place, vérifiez manuellement (pas de rollback automatique, voir ADR-0002)."
+  health_check "$HEALTH_CHECK_URL" || die "Déploiement terminé mais healthcheck KO — le code est en place, vérifiez le log ci-dessus ; pour revenir en arrière : git revert du commit fautif, puis push."
 fi
 
 ok "Déploiement Next.js terminé : ${DEPLOY_PATH}"

@@ -9,7 +9,7 @@ Le déploiement actuel est manuel (upload FTP ou commandes tapées à la main),
 ce qui est jugé trop fastidieux. Il faut un transport scriptable depuis
 GitHub Actions.
 
-Vérifié sur l'hébergement de PECI : l'accès SSH par clé est disponible
+Vérifié sur l'hébergement du projet pilote : l'accès SSH par clé est disponible
 (cPanel → SSH Access → Manage SSH Keys). C'est un prérequis pour ce modèle ;
 un projet dont l'hébergeur ne fournit pas SSH ne peut pas utiliser ce kit
 tel quel (voir « Limites » plus bas).

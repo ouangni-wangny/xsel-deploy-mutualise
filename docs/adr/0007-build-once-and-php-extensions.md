@@ -8,7 +8,7 @@ Jusqu'à v1.0.x, `composer install --no-dev` tournait **sur le serveur**. Sur
 un mutualisé, cela imposait des prérequis manuels et fragiles : composer
 présent (souvent absent), accès réseau vers Packagist, et toutes les
 extensions PHP CLI du build (ex. `ext-zip` pour phpspreadsheet) — chaque
-manque bloquait le déploiement au milieu du flux (cas vécus sur SIS).
+manque bloquait le déploiement au milieu du flux (cas vécus en production).
 
 Les pratiques actuelles (build once / deploy the artifact) recommandent de
 résoudre les dépendances **une fois, dans un environnement de build
@@ -39,7 +39,7 @@ composer.
   `# php -- BEGIN cPanel-generated handler` dans le `.htaccess` du document
   root ; un `rsync` qui écrase ce `.htaccess` (versionné dans le repo)
   supprime le bloc et le domaine retombe sur le PHP hérité du dossier parent,
-  alors que `uapi` continue d'annoncer la bonne version (cas SIS : web en
+  alors que `uapi` continue d'annoncer la bonne version (cas vécu : web en
   8.1.34 pour un CLI en 8.4, donc HTTP 500 via `platform_check`). Le script
   aligne la version dans cPanel (`uapi LangPHP`), puis (ré)installe le bloc
   handler dans le `.htaccess` du docroot (idempotent, règles existantes

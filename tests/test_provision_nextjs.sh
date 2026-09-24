@@ -1,12 +1,12 @@
 # provision-nextjs.sh : déclaration de l'app Node (cloudlinux-selector / uapi PassengerApps), idempotente
 SCRIPT="$REPO/scripts/provision-nextjs.sh"
 
-# Sortie réelle de `cloudlinux-selector get --json --interpreter=nodejs` (Namecheap, abrégée)
+# Sortie réelle de `cloudlinux-selector get --json --interpreter=nodejs` (serveur CloudLinux, abrégée)
 cl_setup() {
   export HOME="$T/home" CL_LOG="$T/cl.log"; mkdir -p "$HOME"; : > "$CL_LOG"
   mkstub cloudlinux-selector 'echo "cl $*" >> "$CL_LOG"
     case "$1" in
-      get) printf "%s" "{\"available_versions\": {\"20.20.2\": {\"base_dir\": \"/opt/alt/alt-nodejs20\", \"status\": \"enabled\", \"users\": {\"u\": {\"applications\": {\"peci-ci.com\": {\"app_mode\": \"production\", \"app_status\": \"started\"}}}}}, \"22.23.2\": {\"base_dir\": \"/opt/alt/alt-nodejs22\", \"status\": \"enabled\"}, \"24.20.0\": {\"base_dir\": \"/opt/alt/alt-nodejs24\", \"status\": \"disabled\"}}}";;
+      get) printf "%s" "{\"available_versions\": {\"20.20.2\": {\"base_dir\": \"/opt/alt/alt-nodejs20\", \"status\": \"enabled\", \"users\": {\"u\": {\"applications\": {\"app-existante.com\": {\"app_mode\": \"production\", \"app_status\": \"started\"}}}}}, \"22.23.2\": {\"base_dir\": \"/opt/alt/alt-nodejs22\", \"status\": \"enabled\"}, \"24.20.0\": {\"base_dir\": \"/opt/alt/alt-nodejs24\", \"status\": \"disabled\"}}}";;
       create) [ "${CL_DENY:-}" = 1 ] && { echo "{\"result\": \"Domain not found\"}"; exit 1; }; echo "{\"result\": \"success\"}";;
     esac'
 }
@@ -18,7 +18,7 @@ test_cloudlinux_declare_l_app_avec_la_bonne_version() {
   assert_contains "$OUT" "app Node déclarée : site.com/ → site.com (Node 22.23.2"
 }
 test_cloudlinux_idempotent_si_l_app_existe() {
-  cl_setup; DEPLOY_PATH="$HOME/peci-ci.com" DOMAIN=peci-ci.com run bash "$SCRIPT"
+  cl_setup; DEPLOY_PATH="$HOME/app-existante.com" DOMAIN=app-existante.com run bash "$SCRIPT"
   assert_eq "$RC" 0; assert_contains "$OUT" "déjà déclarée"; assert_not_contains "$(cat "$CL_LOG")" "create"
 }
 test_cloudlinux_version_absente_ou_desactivee_echoue_clairement() {

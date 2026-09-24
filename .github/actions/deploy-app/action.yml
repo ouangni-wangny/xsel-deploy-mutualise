@@ -314,7 +314,7 @@ runs:
         if [ "$STACK" = "nextjs-passenger" ]; then
           # cPanel "Setup Node.js App" génère son propre .htaccess (routage
           # Passenger), ni suivi en git ni reproductible ; tmp/ est géré par
-          # Passenger. --delete les effacerait (incident vécu sur PECI).
+          # Passenger. --delete les effacerait (incident vécu).
           EXCLUDES+=(--exclude=.htaccess --exclude=tmp)
         fi
         while IFS= read -r p; do

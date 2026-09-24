@@ -1,5 +1,5 @@
 # conform.sh (règles de conformité, --fix, --json) et init.sh --check / --fix / --json.
-# Le projet « avant » reproduit Univers Gravure au jour de son intégration :
+# Le projet « avant » reproduit un monorepo réel au jour de son intégration :
 # chaque règle bloquante correspond à un incident réellement vécu.
 CONFORM="$REPO/scripts/conform.sh"; INIT="$REPO/scripts/init.sh"
 

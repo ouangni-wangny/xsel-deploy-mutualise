@@ -8,7 +8,7 @@ d'ADR-0004.
 Un projet portait ~200 lignes de YAML et devait connaître des détails
 d'hébergement (chemins `/opt/alt/phpXY`, version PHP web, extensions…).
 Chaque problème d'intégration se diagnostiquait par essais successifs sur le
-serveur de production (le déploiement de SIS a demandé une dizaine de tags du
+serveur de production (le déploiement d'un projet a demandé une dizaine de tags du
 kit, publiés en quelques heures). Par ailleurs les scripts serveur venaient de
 `main` alors que le workflow venait d'un tag : les deux pouvaient diverger.
 

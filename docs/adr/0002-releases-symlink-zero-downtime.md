@@ -63,9 +63,9 @@ garanti, pas de rollback instantané).
 ## Incidents rencontrés (tous corrigés, gardés pour mémoire)
 
 **1. `backend/` effacé par le déploiement du frontend.** Première
-tentative avec `--delete` sans protection : sur PECI, le sous-domaine
-`backend.peci-ci.com` vit dans un sous-dossier du `deploy_path` du
-frontend (`peci-ci.com/backend`, chemin cPanel standard pour un
+tentative avec `--delete` sans protection : sur le projet pilote, le sous-domaine
+`backend.example.com` vit dans un sous-dossier du `deploy_path` du
+frontend (`example.com/backend`, chemin cPanel standard pour un
 sous-domaine). `--delete` a traité ce sous-dossier comme obsolète et l'a
 supprimé en entier. → `--delete` retiré temporairement, puis réintroduit
 avec l'input `protect_paths`.

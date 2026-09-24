@@ -90,7 +90,7 @@ test_sauvegarde_ignoree_pour_un_moteur_inconnu() {
   assert_contains "$OUT" "sauvegarde ignorée"
 }
 test_doctor_alerte_si_le_moteur_mysql_par_defaut_n_est_pas_innodb() {
-  # Incident Univers Gravure : MariaDB mutualisée en MyISAM, migrations en échec.
+  # Incident vécu : MariaDB mutualisée en MyISAM, migrations en échec.
   mkdir -p "$T/app/storage"; printf 'APP_KEY=base64:x\nDB_CONNECTION=mysql\nDB_DATABASE=site\nDB_USERNAME=u\nDB_PASSWORD=p\n' > "$T/app/.env"
   for c in mysql mariadb; do mkstub "$c" 'echo "${ENGINE:-MyISAM}"'; done
   run bash -c "cat '$COMMON' '$REPO/scripts/doctor.sh' | STACK=laravel DEPLOY_PATH='$T/app' PHP_BIN=/nonexistent bash -s"

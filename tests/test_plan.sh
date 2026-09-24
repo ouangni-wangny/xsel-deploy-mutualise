@@ -142,13 +142,13 @@ test_dispatch_provision_ne_lance_que_les_apps_a_provisionner() {
   cat > .xsel-deploy.yml <<'Y'
 version: 1
 apps:
-  backend: { deploy_path: /a, provision: { database: sis } }
+  backend: { deploy_path: /a, provision: { database: monapp } }
   frontend: { deploy_path: /b }
 Y
   git add -A; git commit -q -m m
   plan workflow_dispatch REF=refs/heads/main ACTION=provision
   assert_eq "$RC" 0; assert_eq "$(names provision_apps)" "backend"; assert_eq "$(names deploy_apps)" ""; assert_eq "$(names ci_apps)" ""
-  assert_eq "$(echo "$OUT" | sed -n 's/^provision_apps=//p' | jq -r '.[0].provision_database')" "sis"
+  assert_eq "$(echo "$OUT" | sed -n 's/^provision_apps=//p' | jq -r '.[0].provision_database')" "monapp"
   assert_contains "$OUT" "has_provision=true"
 }
 test_provision_n_est_jamais_lance_par_un_push() {
@@ -157,7 +157,7 @@ test_provision_n_est_jamais_lance_par_un_push() {
   assert_contains "$OUT" "has_provision=false"
 }
 test_protect_paths_automatique_pour_une_app_imbriquee() {
-  # Sous-domaine cPanel rangé dans le dossier du domaine principal (PECI, Univers Gravure) :
+  # Sous-domaine cPanel rangé dans le dossier du domaine principal (cas fréquent en monorepo) :
   # sans protection, le rsync --delete du frontend effacerait le backend.
   mkrepo
   cat > .xsel-deploy.yml <<'Y'

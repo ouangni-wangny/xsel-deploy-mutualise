@@ -1,491 +1,422 @@
 # xsel-deploy-mutualise
 
-Source de vérité unique pour le déploiement CI/CD des projets XSEL vers un
-hébergement mutualisé cPanel (SSH par clé, `Setup Node.js App` / Passenger
-pour Node). Un projet consommateur appelle un workflow réutilisable de ce
-repo — build, transfert, install/migrations, sauvegarde, redémarrage,
-healthcheck. Rien de tout ça n'est jamais dupliqué dans un projet.
+Kit CI/CD réutilisable pour déployer des applications **Laravel** et **Next.js**
+sur un **hébergement mutualisé cPanel**, depuis GitHub Actions, par SSH.
 
-Fonctionne aussi bien pour un **monorepo** (un repo, plusieurs apps, comme
-PECI : `backend/` + `frontend/`) que pour un **repo par app** (backend et
-frontend chacun dans leur propre dépôt) — voir
-[« Organiser un projet »](#organiser-un-projet-monorepo-ou-multi-repo).
+Un projet ne porte que **deux fichiers** : un workflow d'appel de quelques lignes
+et un manifeste qui décrit ses applications. Toute la logique vit ici : tests,
+build, transfert, migrations, sauvegarde de la base, redémarrage, vérification
+de santé, surveillance. Une correction apportée au kit profite à tous les projets
+au déploiement suivant.
 
-Décisions d'architecture détaillées dans [`docs/adr/`](docs/adr/) :
-[ADR-0001](docs/adr/0001-ssh-rsync-transport.md) (transport SSH),
-[ADR-0002](docs/adr/0002-releases-symlink-zero-downtime.md) (déploiement
-direct), [ADR-0003](docs/adr/0003-nextjs-passenger.md) (Next.js/Passenger),
-[ADR-0004](docs/adr/0004-central-reusable-workflow.md) (repo central),
-[ADR-0005](docs/adr/0005-ci-cd-separation.md) (CI/CD séparés).
+- **Monorepo ou dépôt par application** : `backend/` + `frontend/` dans un même
+  dépôt, ou un dépôt par app, ou une app à la racine.
+- **Convention plutôt que configuration** : stack, versions de PHP et de Node,
+  binaire PHP du serveur et extensions PHP sont détectés.
+- **Conformité vérifiée** : le pipeline refuse de déployer un projet qui ne
+  respecte pas les règles du kit, et `init.sh --fix` corrige ce qui peut l'être.
+- **Sûr par défaut** : actions épinglées par SHA, jeton GitHub en lecture seule,
+  clé SSH dédiée, sauvegarde avant migration, dossiers sensibles jamais effacés.
 
-## Démarrage rapide — deux fichiers dans le projet
+> **Avant de commencer** : lisez [`REQUIREMENTS.md`](REQUIREMENTS.md). Hébergement
+> avec accès SSH par clé, outils locaux, état du projet : sans ces prérequis, le
+> kit ne peut pas fonctionner.
 
-Un projet ne porte que **deux fichiers** (plus 4 secrets GitHub) ; toute la
-logique reste ici.
+## Sommaire
 
-1. [`templates/cicd-caller.example.yml`](templates/cicd-caller.example.yml) →
-   `.github/workflows/cicd.yml` : 25 lignes, jamais modifiées ensuite.
-2. [`templates/xsel-deploy.example.yml`](templates/xsel-deploy.example.yml) →
-   `.xsel-deploy.yml` : ce qui est propre au projet.
-   ```yaml
-   version: 1
-   apps:
-     backend:
-       deploy_path: /home/utilisateur/public_html/api.example.com
-       health_check_url: https://api.example.com/up
-       database: mysql          # CI : conteneur MySQL pour les tests
-     frontend:
-       deploy_path: /home/utilisateur/nextjs-app
-       health_check_url: https://example.com
-       build_env: { NEXT_PUBLIC_API_URL: https://api.example.com/api/v1 }
-   ```
-3. Secrets : `DEPLOY_SSH_HOST`, `DEPLOY_SSH_PORT`, `DEPLOY_SSH_USER`,
-   `DEPLOY_SSH_PRIVATE_KEY` ([onboarding](#onboarding-dun-nouveau-projet)).
+- [Démarrage rapide](#démarrage-rapide)
+- [Comment ça marche](#comment-ça-marche)
+- [Le manifeste `.xsel-deploy.yml`](#le-manifeste-xsel-deployyml)
+- [Le workflow d'appel `cicd.yml`](#le-workflow-dappel-cicdyml)
+- [Ce que fait un déploiement](#ce-que-fait-un-déploiement)
+- [Organiser un projet](#organiser-un-projet)
+- [Conformité du projet](#conformité-du-projet)
+- [Environnements : production et staging](#environnements--production-et-staging)
+- [Sauvegardes et retour arrière](#sauvegardes-et-retour-arrière)
+- [Surveillance et notifications](#surveillance-et-notifications)
+- [Sécurité](#sécurité)
+- [Versions du kit](#versions-du-kit)
+- [Dépannage](#dépannage)
+- [Limites connues](#limites-connues)
+- [Documentation complémentaire](#documentation-complémentaire)
 
-Stack, versions de PHP/Node, binaire PHP du serveur et extensions PHP sont
-**détectés**. Le kit décide quoi lancer :
+---
+
+## Démarrage rapide
+
+À la racine du projet (voir [`REQUIREMENTS.md`](REQUIREMENTS.md) pour les outils) :
+
+```bash
+K=https://raw.githubusercontent.com/ouangni-wangny/xsel-deploy-mutualise/v1/scripts/init.sh
+bash <(curl -fsSL "$K") --user UTILISATEUR_CPANEL --host HOTE_SSH --port PORT_SSH \
+     --generate-key --set-secrets --fix
+```
+
+`init.sh` ne pose aucune question. Il :
+
+1. détecte les applications (Laravel : `laravel/framework` dans `composer.json` ;
+   Next.js : `next` dans `package.json`) ;
+2. écrit `.xsel-deploy.yml` et `.github/workflows/cicd.yml` sans rien écraser
+   (`--force` pour écraser) ;
+3. génère une clé SSH ed25519 **dédiée**, hors du dépôt (`~/.ssh/xsel-deploy-<projet>`),
+   et affiche la clé **publique** à autoriser dans cPanel ;
+4. pose les 4 secrets GitHub avec `gh`, valeurs lues sur l'entrée standard
+   (jamais en argument de commande) ;
+5. met le projet en conformité (`--fix`), puis affiche les étapes suivantes.
+
+`--dry-run` montre ce qui serait fait sans rien écrire.
+
+Ensuite :
+
+1. **Autoriser la clé publique** : cPanel → *SSH Access* → *Manage SSH Keys* →
+   *Import Key*, puis *Manage* → **Authorize**.
+2. **Adapter le manifeste** : `deploy_path` (dossier sur le serveur) et
+   `health_check_url` (URL publique) de chaque app.
+3. **Relire et commiter** : `git diff`, puis commit et push des fichiers générés.
+4. **Diagnostiquer** : *Actions → CI/CD → Run workflow → `action: doctor`*. Rien
+   n'est déployé ; le rapport vérifie SSH, PHP, extensions, `.env`, base de données.
+5. **Préparer une app neuve** (optionnel) : `action: provision`. Ça crée la base
+   MySQL, son utilisateur et le `.env` de production pour Laravel, et déclare
+   l'app Node pour Next.js. Aucun effet sur une app déjà en place.
+6. **Déployer** : un push sur `main`.
+
+## Comment ça marche
+
+```
+push / pull request / Run workflow / cron
+                 │
+                 ▼
+        ┌──────────────────┐   lit .xsel-deploy.yml, détecte les apps modifiées,
+        │ plan             │   vérifie la conformité du projet (bloquant)
+        └────────┬─────────┘
+       ┌─────────┼──────────────┬──────────────┬──────────────┐
+       ▼         ▼              ▼              ▼              ▼
+     CI        deploy         doctor        provision      monitor
+  (par app)  (une app à la   (diagnostic)  (app neuve)   (URLs + TLS)
+             fois, dans l'ordre
+             du manifeste)
+```
 
 | Événement | Ce qui tourne |
 |---|---|
 | `pull_request` | CI des apps dont les fichiers ont changé |
-| `push` sur `main` | CI des apps modifiées, **puis** déploiement (une app à la fois, dans l'ordre du manifeste) |
-| lancement manuel | déploiement (toutes les apps ou une liste), ou **diagnostic serveur** (`action: doctor`) |
-| cron (15 min) | monitoring des URLs |
+| `push` sur la branche de déploiement (`main` par défaut) | CI des apps modifiées, **puis** déploiement de ces apps, une à la fois, dans l'ordre du manifeste |
+| `push` sur une autre branche | CI seulement (si le workflow d'appel écoute cette branche) |
+| *Run workflow*, `action: deploy` | CI puis déploiement de toutes les apps (ou de la liste `apps`) ; **seulement depuis la branche de déploiement** |
+| *Run workflow*, `action: doctor` | diagnostic du serveur, sans rien modifier |
+| *Run workflow*, `action: provision` | préparation d'une app neuve (idempotent) |
+| cron (toutes les 15 min) | disponibilité des URLs et validité des certificats TLS |
 
-Le manifeste, ou tout fichier sous `.github/`, modifié → toutes les apps sont
-concernées. Détails : [ADR-0010](docs/adr/0010-pipeline-manifest-composite-actions.md).
+Si le manifeste ou un fichier sous `.github/` change, toutes les apps sont
+concernées. La CI d'une app : Laravel → `composer install`, Pint (si `lint`),
+`php artisan test` (avec un MySQL 8 éphémère si `database: mysql`) ; Next.js →
+`npm ci`, `npm run lint` (si `lint`), `npm test` (si défini), `npm run build`.
 
-### Nouveau projet : une commande
+## Le manifeste `.xsel-deploy.yml`
 
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/ouangni-wangny/xsel-deploy-mutualise/v1/scripts/init.sh) \
-     --user monutilisateur --host serveur.example.com --port 22 --generate-key --set-secrets
+Tout ce qui est propre au projet. Modèle commenté :
+[`templates/xsel-deploy.example.yml`](templates/xsel-deploy.example.yml).
+
+```yaml
+version: 1
+
+apps:
+  # L'ordre compte : les apps se déploient dans cet ordre (l'API avant le frontend).
+  backend:
+    deploy_path: /home/UTILISATEUR/example.com/api
+    health_check_url: https://api.example.com/up
+    database: mysql
+    provision: { database: monapp }
+  frontend:
+    deploy_path: /home/UTILISATEUR/example.com
+    health_check_url: https://example.com
+    build_env:
+      NEXT_PUBLIC_API_URL: https://api.example.com/api/v1
 ```
-[`init.sh`](scripts/init.sh) détecte les apps (Laravel / Next.js), écrit
-`.xsel-deploy.yml` et `cicd.yml` (sans rien écraser), génère une clé SSH
-**dédiée** (hors du dépôt) dont il affiche la clé publique à autoriser dans
-cPanel, et pose les 4 secrets. Il ne pose aucune question ; `--dry-run` montre
-ce qui serait fait sans rien écrire.
 
-### Mettre un projet en conformité : `init.sh --fix`
+### Clés de premier niveau
 
-Le pipeline **refuse de lancer la CI et le déploiement** tant qu'une règle
-bloquante n'est pas respectée ; le résumé du run liste chaque problème et sa
-correction. À la racine du projet, par un développeur **ou un agent IA** :
+| Clé | Défaut | Rôle |
+|---|---|---|
+| `version` | — (requis) | Toujours `1` |
+| `apps` | — (requis) | Les applications, par nom. L'ordre est l'ordre de déploiement |
+| `deploy_branch` | `main` | Branche dont un push déploie |
+| `environment` | `production` | *Environment* GitHub des jobs `deploy` et `provision` (approbations : *Settings → Environments*) |
+| `monitor` | URLs `health_check_url` | `{ urls: [...] }` : URLs surveillées par le cron |
+| `policy` | — | `{ ignore: [id, ...] }` : règles de conformité à ne pas appliquer ([ADR-0012](docs/adr/0012-conformite-projet-bloquante.md)) |
+
+### Clés d'une application
+
+| Clé | Défaut | Rôle |
+|---|---|---|
+| `path` | nom de l'app | Dossier de l'app dans le dépôt (`.` pour la racine) |
+| `deploy_path` | — (requis pour déployer) | Chemin **absolu** sur le serveur, sans `..`. Le code y est écrit directement |
+| `health_check_url` | — | URL vérifiée après déploiement et surveillée (Laravel : `/up`). Fortement recommandée |
+| `stack` | `auto` | `laravel` ou `nextjs-passenger` ; `auto` = détectée |
+| `deploy` | `true` | `false` : CI seulement |
+| `ci` | `standard` | `none` : pas de CI pour cette app |
+| `database` | `none` | Laravel : `mysql` = conteneur MySQL 8 pour les tests |
+| `lint` | `false` | `true` : Pint (Laravel) / `npm run lint` (Next.js) bloquants en CI |
+| `php_version` | détectée | Laravel : version PHP du build **et** du serveur. Par défaut : PHP du domaine dans cPanel s'il convient, sinon la plus basse version installée compatible avec `composer.json` |
+| `php_bin` | `auto` | Laravel : binaire PHP **du serveur**. À n'imposer qu'en cas d'ambiguïté |
+| `php_extensions` | — | Laravel : extensions PHP à exiger en plus de celles de `composer.lock` (`[intl, gd]`) ; activées sur le serveur si possible |
+| `manage_web_php` | `true` | Laravel : aligne la version PHP du domaine (MultiPHP) sur celle du déploiement |
+| `composer_on_server` | `false` | Laravel : `false` = `vendor/` construit en CI et livré (recommandé) ; `true` = `composer install` sur le serveur |
+| `composer_bin` | `composer` | Laravel, avec `composer_on_server: true` : binaire composer du serveur |
+| `build_frontend_assets` | `false` | Laravel avec Blade + Vite : compile les assets (`npm run build`) avant déploiement |
+| `node_version` | détectée | Version de Node : `.nvmrc`, `.node-version`, `engines.node`, sinon 22 |
+| `build_env` | — | Variables du build (`NEXT_PUBLIC_*` : **obligatoire ici**, elles sont figées au build) |
+| `protect_paths` | — | Chemins (relatifs à `deploy_path`) que le déploiement ne doit jamais effacer |
+| `provision` | `false` | `true` ou `{ database: nom }` : l'app est préparée par `action: provision` |
+
+Une clé inconnue produit un avertissement (faute de frappe probable).
+
+## Le workflow d'appel `cicd.yml`
+
+Généré par `init.sh`, modèle : [`templates/cicd-caller.example.yml`](templates/cicd-caller.example.yml).
+Il ne change pratiquement jamais.
+
+```yaml
+jobs:
+  pipeline:
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/pipeline.yml@v1
+    secrets:
+      DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+      DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+      DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      NOTIFY_WEBHOOK_URL: ${{ secrets.NOTIFY_WEBHOOK_URL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+```
+
+Les secrets sont passés **un par un**. `secrets: inherit` ne transmet rien à un
+workflow réutilisable d'un autre propriétaire : si le dépôt du projet
+n'appartient pas au même compte que le kit, les secrets arriveraient vides. La
+conformité le bloque.
+
+| Secret | Requis | Contenu |
+|---|---|---|
+| `DEPLOY_SSH_HOST` | oui | Hôte ou IP SSH du serveur |
+| `DEPLOY_SSH_PORT` | oui | Port SSH (souvent différent de 22 en mutualisé) |
+| `DEPLOY_SSH_USER` | oui | Utilisateur cPanel |
+| `DEPLOY_SSH_PRIVATE_KEY` | oui | Clé privée **dédiée**, sans passphrase |
+| `NOTIFY_WEBHOOK_URL` | non | Webhook Slack ou Discord pour les échecs |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | non | Notifications Telegram des échecs |
+
+Entrée du workflow réutilisable : `manifest` (défaut `.xsel-deploy.yml`), utile
+pour le [staging](#environnements--production-et-staging). Lancement manuel :
+`action` (`deploy`, `doctor`, `provision`) et `apps` (noms séparés par des
+virgules ; vide = toutes).
+
+## Ce que fait un déploiement
+
+Le code est écrit **directement** dans `deploy_path` (pas de dossier `releases/`,
+[ADR-0002](docs/adr/0002-releases-symlink-zero-downtime.md)), par une seule
+connexion SSH partagée ([ADR-0006](docs/adr/0006-ssh-connection-multiplexing.md)).
+
+**Laravel**
+
+1. Sur le runner : `composer install --no-dev` (le `vendor/` est livré avec le
+   code), `npm run build` si `build_frontend_assets`.
+2. Préflight serveur : `rsync`, binaire PHP, espace disque. Extensions PHP
+   vérifiées et activées si possible (`selectorctl`). Version PHP du domaine alignée.
+3. Transfert `rsync --delete` (voir les [chemins protégés](#sécurité)).
+4. Sur le serveur : `package:discover`, **sauvegarde de la base**, `migrate --force`,
+   `config:cache`, `route:cache`, `view:cache`, `storage:link`.
+5. Vérification de `health_check_url`. En cas d'échec, diagnostic : code HTTP
+   et dernières erreurs de `storage/logs`.
+
+**Next.js (Passenger)**
+
+1. Sur le runner : `npm ci`, `next build` avec `build_env`. `output: "standalone"`
+   est requis : le serveur n'installe rien.
+2. Transfert du build autonome (`server.js`, `.next/static`, `public/`).
+3. Redémarrage Passenger (`tmp/restart.txt`), puis vérification de santé.
+
+L'app Node doit exister dans cPanel (*Setup Node.js App*, fichier de démarrage
+`server.js`). `action: provision` la déclare : `cloudlinux-selector` sur
+CloudLinux, sinon `uapi PassengerApps`. Les variables d'environnement serveur
+(hors `NEXT_PUBLIC_*`) se règlent dans cPanel → *Setup Node.js App*. Détails :
+[`templates/passenger-nextjs-notes.md`](templates/passenger-nextjs-notes.md).
+
+**Document root Laravel** : un `.htaccess` à la racine de l'app (dans le dépôt,
+[modèle](templates/laravel.htaccess.example)) redirige vers `public/`. Le
+document root cPanel par défaut suffit. Autre solution : pointer le document
+root sur `<deploy_path>/public`.
+
+## Organiser un projet
+
+| Organisation | Manifeste |
+|---|---|
+| Une app à la racine du dépôt | une app avec `path: .` |
+| Monorepo `backend/` + `frontend/` | une app par dossier (le nom de l'app = son dossier par défaut) |
+| Un dépôt par app | un manifeste par dépôt, une app avec `path: .` |
+
+**Apps imbriquées sur le serveur.** Sur cPanel, un sous-domaine vit souvent
+dans le dossier du domaine principal (`example.com/api`). Le `rsync --delete` de
+l'app parente l'effacerait. Le kit le détecte et protège automatiquement toute
+app dont le `deploy_path` est à l'intérieur de celui d'une autre (visible dans
+les logs du job `plan`). `protect_paths` reste nécessaire pour ce qui n'est pas
+une app du manifeste : dossier d'un autre dépôt, fichiers déposés à la main,
+uploads écrits hors de `storage/`.
+
+## Conformité du projet
+
+Le kit vérifie que le projet contient ce qu'il faut pour être déployé
+correctement. Une **erreur** bloque le pipeline : ni CI, ni déploiement. Le
+résumé du run liste chaque problème et sa correction. Un **avertissement**
+n'empêche rien.
 
 ```bash
 K=https://raw.githubusercontent.com/ouangni-wangny/xsel-deploy-mutualise/v1/scripts/init.sh
-bash <(curl -fsSL $K) --check          # contrôle seul, n'écrit rien (code 1 si bloquant)
-bash <(curl -fsSL $K) --fix            # corrige tout ce qui est corrigeable, puis : git diff, commit
-bash <(curl -fsSL $K) --fix --json     # idem, rapport JSON sur stdout (agents, outillage)
+bash <(curl -fsSL "$K") --check          # contrôle seul, n'écrit rien (code 1 si bloquant)
+bash <(curl -fsSL "$K") --fix            # corrige ce qui peut l'être, puis : git diff, commit
+bash <(curl -fsSL "$K") --fix --json     # idem, rapport JSON sur stdout (outillage, agents IA)
 ```
 
-Règles (identifiant, niveau, correction automatique) : [ADR-0012](docs/adr/0012-conformite-projet-bloquante.md).
-Exemples bloquants : `secrets: inherit` vers le kit depuis un autre compte GitHub,
-`output: "standalone"` absent, suite PHPUnit vers un dossier absent, `.env`
-versionné, lockfile absent. Une règle se désactive explicitement dans le
-manifeste : `policy: { ignore: [laravel-htaccess] }`.
+Non interactif, idempotent, codes de sortie stables (0 conforme, 1 erreur
+restante, 2 usage). Le pipeline ne modifie jamais le code : les corrections se
+font en local et passent par une relecture.
 
-Ensuite, depuis l'onglet Actions (*CI/CD → Run workflow*) :
-1. **`action: doctor`** : diagnostic du serveur (ne déploie rien).
-2. **`action: provision`** (app Laravel fraîche) : crée la base MySQL et son
-   utilisateur via cPanel (`uapi`) et un `.env` de production complet
-   (`APP_KEY` générée, `APP_DEBUG=false`, mot de passe généré, jamais affiché).
-   Idempotent : **ne touche à rien si `.env` existe déjà**. À activer par app :
-   `provision: { database: nom }` dans le manifeste.
-3. Un push sur `main` déploie.
-
-### Visibilité et garde-fous (automatiques)
-- **Résumé de déploiement** dans chaque run, et lien vers le site dans
-  l'historique des déploiements GitHub.
-- **Monitoring** : disponibilité HTTP **et** expiration du certificat TLS
-  (avertissement < 21 jours, échec < 7 jours).
-- **Notifications d'échec** (optionnelles) via secrets : `NOTIFY_WEBHOOK_URL`
-  (Slack / Discord) et/ou `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`. Sans secret,
-  rien n'est envoyé. Jamais sur `pull_request`.
-- **Conformité du projet** (bloquante, [ADR-0012](docs/adr/0012-conformite-projet-bloquante.md)) :
-  voir [`init.sh --fix`](#mettre-un-projet-en-conformité--initsh---fix). Non bloquante
-  pour `doctor` et `provision`. `deploy_path` non absolu ou contenant `..` : erreur bloquante.
-- **Dossiers cPanel protégés** : `/.well-known` (validation AutoSSL) et `/cgi-bin`
-  ne sont jamais effacés par `rsync --delete`.
-- **`doctor`** signale un serveur MySQL/MariaDB en MyISAM par défaut.
-
-`@v1` est un tag **flottant** (dernière version 1.x.y dont les tests ont
-passé, déplacé par [`release.yml`](.github/workflows/release.yml)) : les
-projets reçoivent les correctifs sans rien modifier. Pour figer, `@v1.4.0`
-ou un SHA de commit.
-
-Les workflows individuels (`deploy.yml`, `doctor.yml`, `monitor.yml`) restent
-disponibles pour les cas particuliers ; ils partagent la même logique
-(actions composites `deploy-app`, `ci-app`, `doctor-app`).
-
-## Comment ça marche, en une phrase
-
-Push sur `main` → `pipeline.yml` lit le manifeste, lance la CI des apps
-modifiées puis, si elle passe, déploie : build, transfert SSH/rsync,
-install/migrations côté serveur, healthcheck.
-
----
-
-## Référence — `deploy.yml`
-
-### Inputs
-
-| Input | Requis | Défaut | Description |
-|---|---|---|---|
-| `stack` | non | `auto` | `auto` (détecté : `laravel/framework` dans composer.json, `next` dans package.json), `laravel` ou `nextjs-passenger` |
-| `deploy_path` | **oui** | — | Chemin absolu sur le serveur où le code est déployé directement (pas de `releases/`, voir ADR-0002) |
-| `app_path` | non | `.` | Sous-dossier du repo appelant contenant cette app. Laisser `.` si le repo entier est l'app (cas multi-repo) |
-| `health_check_url` | non | `""` | URL publique vérifiée après déploiement. Fortement recommandé — sans ça, un déploiement cassé ne se signale nulle part |
-| `php_version` | non | *(vide = déduite)* | Stack `laravel` : version PHP du build **et** du serveur. Vide : PHP cPanel du domaine si compatible, sinon la plus basse version installée qui satisfait `composer.json` |
-| `node_version` | non | *(vide = détectée)* | Stack `nextjs-passenger` : `.nvmrc` / `.node-version` / `engines.node`, sinon 22 |
-| `build_frontend_assets` | non | `true` | Stack `laravel` uniquement : lance `npm run build` (Vite) avant déploiement |
-| `php_bin` | non | `auto` | Stack `laravel` : binaire PHP **côté serveur**. `auto` : résolu (alt-php CloudLinux, ea-php cPanel, `php` du PATH) — à n'imposer qu'en cas d'ambiguïté (voir [CloudLinux](#cloudlinux--cagefs)) |
-| `composer_on_server` | non | `false` | Stack `laravel` : `false` = dépendances construites par le CI et livrées (recommandé) ; `true` = `composer install` sur le serveur |
-| `environment` | non | `production` | Environment GitHub du déploiement ; y configurer l'approbation manuelle (Settings → Environments) |
-| `manage_web_php` | non | `true` | Stack `laravel` : aligne la version PHP du domaine (cPanel MultiPHP, via `uapi`) sur `php_bin` ; `false` = ne pas y toucher |
-| `php_extensions` | non | *(vide)* | Stack `laravel` : extensions PHP supplémentaires à exiger/activer (`intl,gd`), en plus de celles de `composer.lock` |
-| `composer_bin` | non | `composer` | Stack `laravel`, seulement si `composer_on_server: true` : chemin du binaire composer côté serveur |
-| `build_env` | non | `""` | Variables exposées pendant le build, une par ligne `KEY=VALUE`. **Obligatoire** pour tout `NEXT_PUBLIC_*` (figé au build, jamais relu au runtime) |
-| `protect_paths` | non | `""` | Chemins relatifs à `deploy_path` à protéger de `rsync --delete`, un par ligne — voir [Organiser un projet](#organiser-un-projet-monorepo-ou-multi-repo) |
-
-### Secrets
-
-Tous requis, tous liés à la connexion SSH (voir
-[Onboarding, étapes 1-4](#onboarding-dun-nouveau-projet)) :
-
-| Secret | Description |
-|---|---|
-| `SSH_HOST` | Hôte ou IP du serveur |
-| `SSH_PORT` | Port SSH (souvent non-standard sur du mutualisé, ex. `21098`) |
-| `SSH_USER` | Utilisateur cPanel |
-| `SSH_PRIVATE_KEY` | Clé privée dédiée, **sans passphrase** (voir étape 3) |
-
-### Ce que le workflow protège automatiquement (sans configuration)
-
-Ces exclusions de `rsync --delete` sont câblées en dur, pas besoin de les
-déclarer :
-
-| Chemin | Stack | Pourquoi |
+| Règle | Niveau | Correction auto |
 |---|---|---|
-| `.deploy-scripts/` | toutes | Scripts serveur synchronisés à chaque déploiement (ADR-0004) |
-| `.backups/` | toutes | Sauvegardes DB (voir [Sauvegardes](#sauvegardes)) |
-| `.env`, `storage/` | `laravel` | Config et fichiers persistants — jamais dans le paquet source de toute façon |
-| `.htaccess`, `tmp/` | `nextjs-passenger` | Générés par cPanel *Setup Node.js App*, pas reproductibles depuis le repo |
+| `secrets-inherit` : `secrets: inherit` vers un kit d'un autre propriétaire | erreur | oui |
+| `env-versionne` : `.env` suivi par git | erreur | oui (changer les secrets reste à faire) |
+| `next-standalone` : `output: "standalone"` absent | erreur | oui |
+| `phpunit-dossier` : suite PHPUnit vers un dossier absent du dépôt | erreur | oui |
+| `composer-lock`, `npm-lock` : lockfile absent | erreur | non |
+| `app-introuvable` : `path` du manifeste inexistant | erreur | non |
+| `moteur-innodb` : moteur MySQL non imposé (MariaDB mutualisée souvent en MyISAM) | avertissement | oui |
+| `laravel-htaccess` : `.htaccess` racine absent | avertissement | oui |
+| `version-node` : version de Node non déclarée | avertissement | oui |
+| `dependabot` : `.github/dependabot.yml` absent | avertissement | oui |
+| `health-http` : `health_check_url` en `http://` | avertissement | non |
+| `kit-branche`, `kit-en-retard` : référence du kit | avertissement | non |
 
-## Référence — `monitor.yml`
+Une règle se désactive explicitement, de façon visible en revue de code :
+`policy: { ignore: [laravel-htaccess] }`. Pour `doctor` et `provision`, les
+erreurs sont signalées sans bloquer.
 
-| Input | Requis | Description |
+## Environnements : production et staging
+
+```bash
+bash <(curl -fsSL "$K") --staging staging
+```
+
+Ça écrit `.xsel-deploy.staging.yml` (`deploy_branch: staging`,
+`environment: staging`, dossiers et URLs à adapter) et un `cicd.yml` qui choisit
+le manifeste selon la branche. Un push sur `staging` déploie la préproduction,
+un push sur `main` la production. Chaque environnement a ses propres dossiers,
+URLs, base de données (`provision`) et règles d'approbation (*Settings →
+Environments* : relecteurs obligatoires, délai, branches autorisées).
+
+Un déploiement **manuel** n'est accepté que depuis la branche de déploiement
+du manifeste : « Run workflow » sur une branche de travail ne peut pas partir
+en production.
+
+## Sauvegardes et retour arrière
+
+- **Base de données** (Laravel), avant chaque migration, dans
+  `<deploy_path>/.backups/db/` (5 sauvegardes compressées conservées) :
+  MySQL/MariaDB (`mysqldump`), PostgreSQL (`pg_dump`), SQLite (`sqlite3 .backup`,
+  sinon copie du fichier). Un échec de sauvegarde ne bloque pas le déploiement :
+  il est signalé dans le log.
+- **`.env` de production** : il n'existe que sur le serveur. Gardez-en une copie
+  de secours en secret GitHub (lu par aucun workflow) :
+  `ssh … "cat <deploy_path>/.env" | gh secret set PROD_ENV_BACKUP --repo OWNER/REPO`.
+- **Retour arrière** : `git revert` du commit fautif, puis push. Le pipeline
+  redéploie la version précédente. Si une migration doit être annulée, restaurer
+  la sauvegarde prise juste avant (`gunzip -c … | mysql …`).
+
+## Surveillance et notifications
+
+- **Cron toutes les 15 minutes** : chaque URL doit répondre en 2xx/3xx (5
+  tentatives, 15 s). Le certificat TLS déclenche un avertissement à moins de 21
+  jours de son expiration, et un échec à moins de 7 jours.
+- **Échec d'un run** hors pull request : notification si `NOTIFY_WEBHOOK_URL` ou
+  `TELEGRAM_*` sont définis. Sinon, GitHub prévient le propriétaire du dépôt par e-mail.
+- **Résumé** dans chaque run (apps déployées, version, URL). L'URL du site
+  apparaît dans l'historique des déploiements GitHub.
+
+Tant qu'un site n'est pas en ligne, ne pas renseigner `health_check_url` (ou
+`monitor.urls: []`) : sinon le cron échoue et alerte toutes les 15 minutes.
+
+## Sécurité
+
+- **Clé SSH dédiée au déploiement**, sans passphrase, autorisée seulement dans
+  le compte cPanel concerné, jamais commitée. La rotation se fait pas à pas avec le
+  [runbook](docs/runbooks/rotation-secrets.md).
+- **Actions tierces épinglées par SHA**, mises à jour par Dependabot ; jeton
+  GitHub en `contents: read` ([ADR-0008](docs/adr/0008-supply-chain-hardening.md)).
+- **Secrets jamais en argument de commande** : ni visibles dans `ps`, ni dans
+  les logs. Les mots de passe générés par `provision` ne sont jamais affichés.
+- **Chemins jamais effacés** par `rsync --delete` : `.deploy-scripts/`,
+  `.backups/`, `/.well-known` (validation des certificats), `/cgi-bin` ; Laravel :
+  `.env`, `storage/`, `public/storage` ; Next.js : `.htaccess` et `tmp/` générés
+  par cPanel ; plus les apps imbriquées et les `protect_paths`.
+- **`deploy_path` validé** : un chemin relatif ou contenant `..` est refusé.
+- **Approbation manuelle** possible avant tout déploiement ou provisioning :
+  *Settings → Environments → production → Required reviewers*.
+- Le kit doit rester **public** : GitHub n'autorise l'appel d'un workflow
+  réutilisable d'un autre compte personnel que s'il est public. Il ne contient
+  aucun secret ni aucune donnée de projet
+  ([ADR-0004](docs/adr/0004-central-reusable-workflow.md)).
+
+## Versions du kit
+
+- `@v1` : tag **flottant**, déplacé sur chaque version `1.x.y` dont les tests ont
+  passé. Les projets reçoivent les corrections sans rien modifier. Recommandé.
+- `@v1.7.0` (ou un SHA) : version figée, mise à jour par Dependabot.
+- Historique : [`CHANGELOG.md`](CHANGELOG.md). Un changement incompatible
+  impose une nouvelle version majeure (`v2`).
+
+## Dépannage
+
+| Symptôme | Cause probable | Solution |
 |---|---|---|
-| `urls` | **oui** | URLs à vérifier, une par ligne |
+| `Connection timed out` dès « Configurer la clé SSH » | Port SSH faux, SSH fermé, ou pare-feu de l'hébergeur filtrant les IP | Vérifier le port dans cPanel → *SSH Access* ; demander à l'hébergeur d'ouvrir SSH par clé sans liste d'IP |
+| `Permission denied (publickey)` | Clé non autorisée dans cPanel, mauvais utilisateur, ou passphrase | *Manage SSH Keys* → *Authorize* ; `ssh-keygen -p -f cle` pour retirer la passphrase |
+| `host key introuvable sur :` (hôte et port vides) | Secrets non transmis (`secrets: inherit` avec un autre propriétaire) ou absents | Passer les secrets un par un (`init.sh --fix`) ; vérifier *Settings → Secrets* |
+| Échec au job `plan`, étape « Conformité du projet » | Règle bloquante non respectée | Lire le résumé du run ; `init.sh --fix` |
+| `Test directory "…" not found` en CI | Suite PHPUnit vers un dossier non versionné | `init.sh --fix` (règle `phpunit-dossier`) |
+| `Specified key was too long; max key length is 1000 bytes` | Tables créées en MyISAM | Imposer InnoDB (`init.sh --fix`, règle `moteur-innodb`) ; vider la base partiellement migrée (`php artisan db:wipe --force`) si elle est neuve |
+| `.env manquant` au déploiement | App jamais préparée | `action: provision`, ou créer le `.env` à la main |
+| Healthcheck en HTTP 500 après déploiement | Erreur applicative ou PHP web ≠ PHP du déploiement | Le log du job affiche les dernières erreurs Laravel ; `action: doctor` compare les versions PHP |
+| Next.js : 503 / page Passenger | App Node absente ou mauvais fichier de démarrage | `action: provision` ; vérifier `server.js` dans *Setup Node.js App* |
+| « déploiement manuel refusé depuis … » | Run workflow lancé hors de la branche de déploiement | Lancer depuis `main` (ou la branche du manifeste de staging) |
+| Le cron échoue toutes les 15 minutes | URL surveillée hors ligne ou pas encore publiée | Corriger le site, ou retirer l'URL du manifeste tant qu'il n'est pas en ligne |
 
-Réutilisable, indépendant des déploiements — voir
-[`templates/monitor-caller.example.yml`](templates/monitor-caller.example.yml).
-Échoue (et GitHub envoie un email au propriétaire du repo) si une URL ne
-répond pas en 2xx/3xx sous 15s, après 5 tentatives.
+## Limites connues
 
----
+- **SSH obligatoire.** Les hébergeurs qui ne proposent que le FTP ne sont pas
+  pris en charge : sans SSH, ni migrations, ni caches, ni sauvegarde de base ne
+  sont possibles proprement ([ADR-0001](docs/adr/0001-ssh-rsync-transport.md)).
+  Demander l'activation de SSH à l'hébergeur.
+- **Pare-feu SSH par IP.** Les runners GitHub ont des IP variables : un
+  hébergeur qui n'ouvre SSH qu'à une liste d'IP bloque le déploiement. Le kit
+  n'ouvre que 2 connexions par déploiement, mais la règle doit être levée chez
+  l'hébergeur.
+- **Rotation des secrets manuelle**, documentée pas à pas dans le
+  [runbook](docs/runbooks/rotation-secrets.md).
 
-## Stacks supportées
+## Documentation complémentaire
 
-| `stack` | Build (CI) | Serveur |
-|---|---|---|
-| `laravel` | `composer` (tests, via la CI du projet), `npm run build` (Vite, optionnel) | `composer install --no-dev`, sauvegarde DB, migrations, cache Laravel |
-| `nextjs-passenger` | `next build` (`output: "standalone"` **requis** dans `next.config`) | Aucune install serveur — le build standalone embarque ses dépendances |
+- [`REQUIREMENTS.md`](REQUIREMENTS.md) : prérequis (hébergement, GitHub, poste, projet).
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) : faire évoluer le kit (tests, règles, releases).
+- [`CHANGELOG.md`](CHANGELOG.md) : historique des versions.
+- [`docs/adr/`](docs/adr/) : décisions d'architecture (transport SSH, déploiement
+  direct, Passenger, workflow central, pipeline et manifeste, conformité…).
+- [`docs/runbooks/`](docs/runbooks/) : procédures d'exploitation.
+- [`templates/`](templates/) : fichiers à copier dans un projet.
 
-> **CloudLinux (CageFS)** — `php`/`composer` par défaut peuvent être la
-> mauvaise version. Sur les hébergeurs utilisant CloudLinux (reconnaissable
-> à `~/.cagefs`), le `php` du `PATH` correspond à une version différente de
-> celle réellement sélectionnée pour le compte, et `composer` est souvent
-> absent du `PATH` alors qu'il existe déjà. Vérifier avant le premier
-> déploiement :
-> ```bash
-> ls -d /opt/alt/php*/usr/bin/php   # ex. /opt/alt/php83/usr/bin/php
-> ls /opt/alt/php83/usr/bin/composer
-> ```
-> Puis renseigner `php_bin` / `composer_bin` avec les chemins trouvés.
+### Workflows individuels (usage avancé)
 
----
-
-## Organiser un projet : monorepo ou multi-repo
-
-### Multi-repo (un repo par app) — cas le plus simple
-
-Chaque repo appelle le workflow avec `app_path: .` (le défaut — pas besoin
-de le préciser). `protect_paths` n'est généralement pas nécessaire, sauf
-si les deux repos partagent quand même un `deploy_path` imbriqué côté
-serveur (rare hors monorepo, mais possible si les deux apps sont
-volontairement rangées sous le même dossier cPanel).
-
-```yaml
-with:
-  stack: laravel
-  deploy_path: /home/user/api.example.com
-```
-
-### Monorepo (un repo, plusieurs apps) — cas PECI
-
-Chaque app a son propre workflow appelant dans le même repo
-(`deploy-backend.yml`, `deploy-frontend.yml`), chacun avec son `app_path`
-et des `paths:` de déclenchement distincts pour ne réagir qu'aux
-changements qui la concernent.
-
-**Point d'attention spécifique au monorepo** : sur cPanel, un sous-domaine
-(ex. `api.example.com`) vit souvent *physiquement* dans un sous-dossier du
-domaine principal (`example.com/api`) — donc dans le `deploy_path` de
-l'autre app. Sans `protect_paths`, le déploiement de l'app parente
-supprimerait ce sous-dossier via `rsync --delete` (incident réel, voir
-[ADR-0002](docs/adr/0002-releases-symlink-zero-downtime.md)) :
-
-Depuis `v1.7.0`, c'est **automatique** entre apps d'un même manifeste : une app
-dont le `deploy_path` est à l'intérieur de celui d'une autre est ajoutée d'office
-aux `protect_paths` de la parente (visible dans les logs du job `plan`).
-`protect_paths` reste utile pour ce qui n'est pas une app du manifeste
-(dossier d'un autre dépôt, fichiers déposés à la main) :
-
-```yaml
-# workflow de l'app "parente" (ex. frontend, deploy_path: /home/user/example.com)
-with:
-  protect_paths: |
-    api
-```
-
----
-
-## Onboarding d'un nouveau projet
-
-### 1. Générer et autoriser une clé SSH dédiée au déploiement
-
-cPanel → *SSH Access* → *Manage SSH Keys* → **Generate a New Key**.
-- Nom : `github-actions-deploy` (ou similaire).
-- **Passphrase** : certaines versions de cPanel l'exigent (min. 5
-  caractères, force ≥ 80) — utiliser **Password Generator**, noter le
-  mot de passe temporairement (nécessaire une seule fois, à l'étape 3).
-- **Generate Key**, puis dans la liste *Private Keys*, cliquer **Manage**
-  sur cette clé → **Authorize** (sans ça, la connexion SSH sera refusée
-  même avec la bonne clé).
-
-### 2. Récupérer host / port / utilisateur SSH
-
-Écran principal **cPanel → SSH Access** (pas le sous-écran "Manage
-Keys"). Exemple de commande affichée :
-
-```
-ssh moncpaneluser@monserveur.exemple.com -p 21098
-```
-
-`moncpaneluser` → `SSH_USER` · `monserveur.exemple.com` → `SSH_HOST`
-(peut être une IP) · `21098` → `SSH_PORT` (souvent différent de 22 —
-vérifier, ne pas supposer).
-
-### 3. Télécharger la clé privée et retirer sa passphrase
-
-*Manage SSH Keys* → sur la clé créée → **View/Download** → télécharger
-le fichier de clé privée (pas la `.pub`), ex. `~/Downloads/github-actions-deploy`.
-
-```bash
-ssh-keygen -p -f ~/Downloads/github-actions-deploy
-```
-
-Ancienne passphrase (celle du Password Generator), puis nouvelle **vide**
-(Entrée) aux deux invites suivantes — GitHub Actions ne peut pas saisir
-de passphrase à la connexion.
-
-### 4. Ajouter les 4 secrets GitHub Actions
-
-```bash
-gh secret set SSH_HOST --repo <owner>/<repo> --body "monserveur.exemple.com"
-gh secret set SSH_PORT --repo <owner>/<repo> --body "21098"
-gh secret set SSH_USER --repo <owner>/<repo> --body "moncpaneluser"
-gh secret set SSH_PRIVATE_KEY --repo <owner>/<repo> < ~/Downloads/github-actions-deploy
-```
-
-(La dernière commande lit le fichier directement plutôt que de coller la
-clé en argument — évite qu'elle traîne dans un historique de shell.)
-
-### 5. Créer le dossier de base sur le serveur (une fois par app)
-
-> Depuis `v1.5.0`, `action: provision` fait tout ceci sans SSH manuel (voir
-> [Nouveau projet](#nouveau-projet--une-commande)). Méthode manuelle, toujours valable :
-
-Copier [`scripts/bootstrap-app.sh`](scripts/bootstrap-app.sh) sur le
-serveur, puis :
-```bash
-ssh <user>@<host> -p <port>
-DEPLOY_PATH=/home/<user>/<app> STACK=laravel bash bootstrap-app.sh
-# ou : STACK=nextjs-passenger
-
-# Laravel uniquement : remplir le .env de prod (créé vide par le script)
-nano /home/<user>/<app>/.env
-```
-
-### 6. Configurer cPanel pour servir l'app
-
-- **Laravel** — deux options :
-  - **Recommandé, sans manip cPanel** : copier
-    [`templates/laravel.htaccess.example`](templates/laravel.htaccess.example)
-    à la racine du projet **dans le repo** (`.htaccess`, committé — donc
-    redéployé automatiquement à chaque fois ; pas `public/.htaccess`, qui
-    a le sien). Fonctionne avec le document root par défaut de cPanel pour
-    un nouveau (sous-)domaine.
-  - **Alternative** : cPanel → *Domains* → changer le document root vers
-    `<deploy_path>/public` — dans ce cas, pas besoin du `.htaccess` racine.
-- **Next.js** : `action: provision` (avec `provision: true` sur l'app dans le
-  manifeste) déclare l'app Node tout seul — `cloudlinux-selector` sur CloudLinux
-  (version de Node = `.nvmrc` / `node_version`), sinon `uapi PassengerApps` ;
-  idempotent. À défaut : cPanel → *Setup Node.js App* → *Create Application*,
-  Application root = `<deploy_path>`, fichier de démarrage `server.js` (détail dans
-  [`templates/passenger-nextjs-notes.md`](templates/passenger-nextjs-notes.md)).
-  cPanel génère lui-même un `.htaccess` à cette étape — ne jamais le
-  committer ni le modifier à la main, le workflow le protège déjà.
-
-### 7. Diagnostiquer le serveur, puis ajouter le workflow appelant
-
-**Avant** le premier déploiement, copier
-[`templates/doctor-caller.example.yml`](templates/doctor-caller.example.yml) dans
-le projet et lancer *Actions → Doctor → Run workflow*. Il ne déploie rien : il
-vérifie SSH, les PHP installés (CLI et web), les extensions, `.env`,
-`APP_DEBUG`, les sauvegardes… et affiche le bloc `with:` à coller.
-
-Puis copier [`templates/caller-workflow.example.yml`](templates/caller-workflow.example.yml).
-Le minimum se réduit à trois entrées (`app_path`, `deploy_path`,
-`health_check_url`) : le reste est détecté. Référence complète des
-[inputs](#inputs) ci-dessus.
-
-### 8. Ajouter le monitoring (recommandé)
-
-Copier [`templates/monitor-caller.example.yml`](templates/monitor-caller.example.yml)
-vers `.github/workflows/monitor.yml`, adapter les URLs.
-
-### 9. Premier déploiement
-
-Push sur `main` → déploiement automatique. En cas de problème : revert du
-commit fautif et push (la base a été sauvegardée juste avant les migrations,
-voir [Sauvegardes](#sauvegardes)).
-
-### 10. Environnement de staging (optionnel)
-
-```bash
-bash <(curl -fsSL …/init.sh) --staging staging
-```
-écrit `.xsel-deploy.staging.yml` (`deploy_branch: staging`, `environment: staging`,
-dossiers et URLs à adapter) et un `cicd.yml` qui choisit le manifeste selon la
-branche : un push sur `staging` déploie la préproduction, un push sur `main` la
-production, chacun avec ses propres dossiers, URLs, base (`provision`) et
-approbations (*Settings → Environments*). Un déploiement **manuel** n'est accepté
-que depuis la branche de déploiement du manifeste : « Run workflow » sur une
-branche de travail ne peut plus partir en production.
-
----
-
-## Sauvegardes
-
-- **Base de données** (`laravel`) : avant chaque `migrate --force`, dans
-  `<deploy_path>/.backups/db/` (5 sauvegardes compressées conservées, purge
-  automatique) — MySQL/MariaDB (`mysqldump`), PostgreSQL (`pg_dump`), SQLite
-  (`sqlite3 .backup`, sinon copie du fichier). Ne bloque jamais le déploiement si
-  l'outil échoue ou est absent — c'est un filet, pas un pré-requis.
-- **`.env` de prod** : n'existe que sur le serveur par défaut, aucune
-  copie automatique. Recommandé, une fois rempli (étape 5) :
-  ```bash
-  gh secret set PROD_ENV_BACKUP --repo <owner>/<repo> < .env
-  ```
-  comme copie de secours — à remettre à jour manuellement si le `.env`
-  change. Ce secret n'est lu par aucun workflow, c'est une sauvegarde pure.
-
-## Qualité du kit lui-même
-
-[`lint.yml`](.github/workflows/lint.yml) valide ce repo à chaque push :
-`actionlint` sur les workflows, `shellcheck` sur les scripts serveur. Tout
-projet consommateur hérite d'un changement ici dès son prochain
-déploiement (voir ADR-0004) — ce lint est la seule protection avant que
-ce repo ne casse tout le monde en même temps.
-
----
-
-## Ce qui manque / limites connues
-
-- **Hébergeurs sans SSH non supportés** (FTP uniquement) — choix assumé :
-  sans SSH, ni migrations, ni caches, ni sauvegarde de base ne sont possibles
-  proprement ; voir [ADR-0001](docs/adr/0001-ssh-rsync-transport.md). Demander
-  l'activation de SSH à l'hébergeur.
-- **Pare-feu SSH de l'hébergeur** : le kit n'ouvre que 2 connexions (ADR-0006),
-  mais un hébergeur qui filtre SSH par IP bloque les runners GitHub (IP
-  variables) — symptôme : `Connection timed out` (pas `Permission denied`) dès
-  l'étape « Configurer la clé SSH ». À faire lever côté hébergeur.
-- **Rotation des secrets manuelle** mais documentée pas à pas :
-  [runbook](docs/runbooks/rotation-secrets.md) (clé SSH, mot de passe MySQL,
-  `APP_KEY`, jetons de notification).
-
-## Statut
-
-Conçu par ADR, validé en conditions réelles sur PECI (plusieurs incidents
-rencontrés et corrigés en direct — voir les ADR et l'historique des
-commits). Versions taguées :
-
-- **`v1.7.0`** (courant) — `provision` déclare l'app Node (cloudlinux-selector /
-  uapi PassengerApps) ; `protect_paths` automatique entre apps imbriquées ;
-  sauvegarde PostgreSQL et SQLite ; environnement de **staging** (`init.sh --staging`,
-  manifeste par branche) ; déploiement manuel refusé hors de la branche de
-  déploiement ; runbook de rotation des secrets. Voir
-  [ADR-0013](docs/adr/0013-limites-levees.md).
-- **`v1.6.0`** — **conformité du projet bloquante** et corrigeable :
-  `scripts/conform.sh` (source unique des règles), `init.sh --check / --fix / --json`
-  (dev ou agent IA), résumé du run avec corrections, `policy.ignore` ; `/.well-known`
-  et `/cgi-bin` protégés au déploiement ; base de test CI prioritaire sur
-  `phpunit.xml` ; `doctor` contrôle le moteur MySQL ; `cicd.yml` généré sans
-  `secrets: inherit`. Voir [ADR-0012](docs/adr/0012-conformite-projet-bloquante.md).
-- **`v1.5.0`** — action **`provision`** (base MySQL + utilisateur +
-  `.env` de production via `uapi`, idempotent), commande **`init.sh`**,
-  monitoring du certificat TLS, notifications d'échec (webhook / Telegram),
-  résumé de déploiement, politiques (`.env` versionné, http, kit en retard),
-  validation du `deploy_path`. Voir
-  [ADR-0011](docs/adr/0011-provisioning-init-visibility.md).
-- **`v1.4.0`** — point d'entrée unique **`pipeline.yml`** +
-  manifeste `.xsel-deploy.yml` (CI standard, déploiement séquentiel des apps
-  modifiées, diagnostic, monitoring), logique déplacée dans des actions
-  composites, tag flottant **`v1`** géré par `release.yml`. Voir
-  [ADR-0010](docs/adr/0010-pipeline-manifest-composite-actions.md).
-- **`v1.3.1`** — corrige un bug de `v1.3.0` : un `php_bin` explicite
-  était ignoré (traité comme `auto`) ; tests de câblage des workflows. **Ne pas
-  utiliser `v1.3.0`.**
-- **`v1.3.0`** — *convention plutôt que configuration* : `stack`,
-  `php_version`, `php_bin`, `node_version` et extensions PHP sont détectés ;
-  nouveau workflow **`doctor`** (diagnostic serveur en lecture seule + config
-  suggérée) ; le kit est récupéré **à la version exacte du workflow appelé**
-  (`job.workflow_sha`) ; suite de tests (`tests/`) exécutée en CI ; corrige
-  deux bugs de `common.sh` (sauvegarde DB avortant le déploiement si
-  `DB_PORT` absent, tableau vide sous bash < 4.4). Voir
-  [ADR-0009](docs/adr/0009-convention-doctor-tests.md).
-- **`v1.2.0`** — durcissement : actions épinglées par SHA (+
-  Dependabot), `permissions: contents: read`, entrée `environment` (défaut
-  `production`) pour l'approbation manuelle côté dépôt. Voir
-  [ADR-0008](docs/adr/0008-supply-chain-hardening.md).
-- **`v1.1.2`** — le handler PHP du domaine est réinstallé dans le
-  `.htaccess` après chaque transfert (le rsync l'effaçait : site en PHP hérité
-  du parent, HTTP 500) ; diagnostic de la version web réellement exécutée.
-- **`v1.1.1`** — aligne la version PHP du domaine (MultiPHP, entrée
-  `manage_web_php`) ; healthcheck avec diagnostic ; sauvegarde DB fiable
-  (lecture du `.env` via phpdotenv, `--no-tablespaces`).
-- **`v1.1.0`** — *build once* : `composer install` sur le runner,
-  `vendor/` livré avec le code (nouvelle entrée `composer_on_server`, défaut
-  `false`) ; extensions PHP déduites de `composer.lock`, vérifiées et
-  activées via `selectorctl` avant le transfert (`php_extensions` pour en
-  ajouter). Voir [ADR-0007](docs/adr/0007-build-once-and-php-extensions.md).
-- **`v1.0.4`** — hébergeurs sans composer : le workflow envoie
-  le `composer.phar` du runner, exécuté avec `php_bin` (le préflight ne
-  bloque plus sur `composer_bin` introuvable).
-- **`v1.0.3`** — le préflight liste les binaires php/composer
-  réellement présents sur le serveur quand `php_bin`/`composer_bin` est faux.
-- **`v1.0.2`** — une seule connexion SSH par déploiement
-  (`ControlMaster`), `ConnectTimeout` et retry : corrige les blocages
-  « `ssh: connect … Connection timed out` » sur les hébergeurs qui limitent
-  les connexions par IP ([ADR-0006](docs/adr/0006-ssh-connection-multiplexing.md)).
-- **`v1.0.1`** — protège `.htaccess`/`tmp` générés par cPanel
-  (`nextjs-passenger`) de `rsync --delete`.
-- **`v1.0.0`** — première version stable : sauvegarde DB, `--delete`
-  sécurisé (`protect_paths`), préflight, lint, monitoring périodique.
-
-Épingler un projet consommateur sur la dernière version taguée plutôt
-que sur `@main` (voir [Onboarding, étape 7](#7-ajouter-le-workflow-appelant)
-et le [template](templates/caller-workflow.example.yml)).
+`deploy.yml`, `doctor.yml` et `monitor.yml` restent appelables séparément pour
+des cas particuliers ; ils partagent la logique du pipeline (actions composites
+`deploy-app`, `doctor-app`). Leurs secrets s'appellent `SSH_HOST`, `SSH_PORT`,
+`SSH_USER`, `SSH_PRIVATE_KEY`. Exemples :
+[`caller-workflow`](templates/caller-workflow.example.yml),
+[`doctor-caller`](templates/doctor-caller.example.yml),
+[`monitor-caller`](templates/monitor-caller.example.yml). Pour un nouveau
+projet, préférez toujours le pipeline (`cicd.yml` + manifeste).

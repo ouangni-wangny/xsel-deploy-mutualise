@@ -1,7 +1,11 @@
+# USAGE AVANCÉ — workflow individuel deploy.yml. Pour un nouveau projet, préférez
+# le pipeline : templates/cicd-caller.example.yml + templates/xsel-deploy.example.yml
+# (CI, déploiement, diagnostic, provisioning, surveillance et conformité inclus).
+#
 # Trois exemples de .github/workflows/deploy.yml dans un projet consommateur
-# (copier-adapter — c'est la SEULE chose qu'un projet doit porter en plus de
-# ses secrets GitHub et de sa propre CI de tests, voir ADR-0004 et ADR-0005).
-# Référence complète des inputs/secrets dans le README de ce repo.
+# (copier-adapter). Le projet porte aussi sa propre CI de tests (ci.yml). Entrées :
+# celles de .github/workflows/deploy.yml du kit ; secrets : SSH_HOST, SSH_PORT,
+# SSH_USER, SSH_PRIVATE_KEY.
 
 # =============================================================================
 # Cas 1 — Repo dédié à une seule app (multi-repo : le plus simple)
@@ -20,12 +24,12 @@ jobs:
 
   deploy:
     needs: ci
-    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@v1.3.1
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@v1
     with:
       # stack, php_version, php_bin, extensions PHP, Node : détectés
       # automatiquement (surchargeables — voir la référence des inputs).
-      deploy_path: /home/xselcpaneluser/api.exemple.com
-      health_check_url: https://api.exemple.com/up
+      deploy_path: /home/UTILISATEUR/api.example.com
+      health_check_url: https://api.example.com/up
     secrets:
       SSH_HOST: ${{ secrets.SSH_HOST }}
       SSH_PORT: ${{ secrets.SSH_PORT }}
@@ -34,7 +38,7 @@ jobs:
 
 ---
 # =============================================================================
-# Cas 2 — Monorepo, app backend (ex. PECI : .github/workflows/deploy-backend.yml)
+# Cas 2 — Monorepo, app backend (.github/workflows/deploy-backend.yml)
 # app_path pointe vers le sous-dossier ; paths: limite le déclenchement.
 # =============================================================================
 
@@ -53,12 +57,12 @@ jobs:
 
   deploy:
     needs: ci
-    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@v1.3.1
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@v1
     with:
       stack: laravel
       app_path: backend
-      deploy_path: /home/xselcpaneluser/api.peci.org
-      health_check_url: https://api.peci.org/up
+      deploy_path: /home/UTILISATEUR/example.com/api
+      health_check_url: https://api.example.com/up
       # CloudLinux uniquement (voir README) : chemins réels si /usr/bin/php
       # et 'composer' ne correspondent pas à la version voulue.
       # php_bin: /opt/alt/php83/usr/bin/php
@@ -72,9 +76,10 @@ jobs:
 ---
 # =============================================================================
 # Cas 3 — Monorepo, app frontend (même projet que le cas 2, deuxième app)
-# protect_paths évite qu'un sous-domaine imbriqué (backend.peci.org vivant
-# dans peci.org/backend, chemin standard cPanel) soit effacé par le
-# déploiement de ce frontend — voir README, section "Organiser un projet".
+# protect_paths évite qu'un sous-domaine imbriqué (api.example.com vivant
+# dans example.com/api, chemin standard cPanel) soit effacé par le
+# déploiement de ce frontend. (Le pipeline le fait automatiquement ; ici,
+# avec des workflows séparés, il faut le déclarer.)
 # =============================================================================
 
 name: Deploy frontend
@@ -92,19 +97,19 @@ jobs:
 
   deploy:
     needs: ci
-    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@v1.3.1
+    uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/deploy.yml@v1
     with:
       stack: nextjs-passenger
       app_path: frontend
-      deploy_path: /home/xselcpaneluser/peci.org
-      health_check_url: https://peci.org
+      deploy_path: /home/UTILISATEUR/example.com
+      health_check_url: https://example.com
       protect_paths: |
-        backend
+        api
       # Toute variable NEXT_PUBLIC_* lue côté client doit être ici, sinon
       # elle vaudra undefined dans le bundle buildé (jamais relue au
       # runtime via cPanel) :
       build_env: |
-        NEXT_PUBLIC_API_URL=https://api.peci.org
+        NEXT_PUBLIC_API_URL=https://api.example.com/api/v1
     secrets:
       SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
       SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}

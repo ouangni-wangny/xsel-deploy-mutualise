@@ -7,8 +7,8 @@
 # releases/ (voir ADR-0002).
 #
 # Usage (sur le serveur, via SSH) :
-#   DEPLOY_PATH=/home/user/api.peci.org STACK=laravel bash bootstrap-app.sh
-#   DEPLOY_PATH=/home/user/peci.org     STACK=nextjs-passenger bash bootstrap-app.sh
+#   DEPLOY_PATH=/home/user/api.example.com STACK=laravel bash bootstrap-app.sh
+#   DEPLOY_PATH=/home/user/example.com   STACK=nextjs-passenger bash bootstrap-app.sh
 # =============================================================================
 set -euo pipefail
 

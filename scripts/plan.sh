@@ -91,7 +91,7 @@ APPS="$(jq -c 'def d(x): if . == null then x else . end;
 
 # protect_paths automatique : une app dont le deploy_path est À L'INTÉRIEUR de
 # celui d'une autre (sous-domaine cPanel rangé dans le dossier du domaine
-# principal, cas PECI / Univers Gravure) serait effacée par le rsync --delete de
+# principal, cas fréquent en monorepo) serait effacée par le rsync --delete de
 # l'app parente. On l'ajoute d'office aux protect_paths de la parente.
 APPS="$(jq -c '. as $all | map(. as $a | ($a.deploy_path | sub("/+$";"")) as $root
   | ($all | map(select(.name != $a.name and $root != "" and (.deploy_path | startswith($root + "/")))

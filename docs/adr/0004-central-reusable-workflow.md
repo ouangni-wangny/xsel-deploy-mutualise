@@ -18,7 +18,7 @@ le corriger séparément dans chaque projet.
   - les **scripts de déploiement serveur** (`scripts/`), génériques par
     stack (`laravel`, `nextjs-passenger`), paramétrés par variables
     d'environnement — jamais copiés-collés dans un projet consommateur.
-- Un projet consommateur (ex. `peci`) ne porte que :
+- Un projet consommateur (ex. le projet pilote) ne porte que :
   - un petit workflow appelant (`.github/workflows/deploy.yml` du projet,
     voir `templates/caller-workflow.example.yml`) qui référence le workflow
     réutilisable et renseigne ses `with:` (stack, chemin serveur,
@@ -39,7 +39,7 @@ le corriger séparément dans chaque projet.
 ## Conséquences
 - Un changement buggé dans ce repo peut casser le déploiement de *tous* les
   projets consommateurs en même temps — d'où l'intérêt de disposer d'un
-  projet de référence (PECI) pour valider chaque évolution avant qu'elle ne
+  projet de référence (le projet pilote) pour valider chaque évolution avant qu'elle ne
   soit taguée/adoptée largement.
 - Référencer `@main` dans le workflow appelant donne la dernière version
   automatiquement (pratique en phase de rodage) ; épingler un tag

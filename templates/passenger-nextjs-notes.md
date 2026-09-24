@@ -13,7 +13,7 @@ direct, sans `current`/releases) :
      workflow appelant doit correspondre).
    - Application mode : `Production`.
    - Application root : le `deploy_path` du workflow appelant (ex.
-     `peci.org` si l'app root cPanel est `/home/user/peci.org`).
+     `example.com` si l'app root cPanel est `/home/user/example.com`).
    - Application URL : le (sous-)domaine cible.
    - **Application startup file** : `server.js`
      (le serveur généré par `next build` avec `output: "standalone"`).
