@@ -154,14 +154,14 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout du projet appelant
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: app
 
       # Le kit est récupéré À LA VERSION EXACTE du workflow appelé (contexte
       # job.workflow_sha) : workflow, scripts et actions restent cohérents.
       - name: Checkout xsel-deploy-mutualise (même version que ce workflow)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
