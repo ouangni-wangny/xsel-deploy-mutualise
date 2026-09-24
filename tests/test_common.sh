@@ -96,6 +96,9 @@ test_doctor_alerte_si_le_moteur_mysql_par_defaut_n_est_pas_innodb() {
   run bash -c "cat '$COMMON' '$REPO/scripts/doctor.sh' | STACK=laravel DEPLOY_PATH='$T/app' PHP_BIN=/nonexistent bash -s"
   assert_contains "$OUT" "moteur MySQL par défaut : MyISAM"
   assert_contains "$OUT" "imposer InnoDB dans config/database.php"
+  mkdir -p "$T/app/config"; echo "'engine' => env('DB_ENGINE', 'InnoDB')," > "$T/app/config/database.php"
+  run bash -c "cat '$COMMON' '$REPO/scripts/doctor.sh' | STACK=laravel DEPLOY_PATH='$T/app' PHP_BIN=/nonexistent bash -s"
+  assert_contains "$OUT" "le projet impose InnoDB"; assert_not_contains "$OUT" "imposer InnoDB dans"
   run bash -c "cat '$COMMON' '$REPO/scripts/doctor.sh' | ENGINE=InnoDB STACK=laravel DEPLOY_PATH='$T/app' PHP_BIN=/nonexistent bash -s"
   assert_contains "$OUT" "moteur MySQL par défaut : InnoDB"; assert_not_contains "$OUT" "imposer InnoDB"
 }

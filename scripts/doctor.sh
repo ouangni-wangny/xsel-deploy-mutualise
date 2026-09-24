@@ -25,7 +25,10 @@ db_engine_check() {
   engine="$(MYSQL_PWD="$db_pass" "$cli" -N -B -h "${db_host:-127.0.0.1}" -P "${db_port:-3306}" -u "$db_user" "$db_name" \
     -e 'SELECT @@default_storage_engine' 2>/dev/null)" || { echo "moteur MySQL par défaut : connexion à la base impossible (identifiants du .env ?)"; return 0; }
   echo "moteur MySQL par défaut : ${engine}"
-  if [ "$(printf '%s' "$engine" | tr '[:lower:]' '[:upper:]')" != "INNODB" ]; then
+  [ "$(printf '%s' "$engine" | tr '[:lower:]' '[:upper:]')" = "INNODB" ] && return 0
+  if grep -qiE "'engine'[[:space:]]*=>.*InnoDB" "$(dirname "$1")/config/database.php" 2>/dev/null; then
+    echo "✓ le projet impose InnoDB (config/database.php) : sans conséquence"
+  else
     echo "⚠️  les tables seraient créées en ${engine} : imposer InnoDB dans config/database.php ('engine' => env('DB_ENGINE', 'InnoDB')) — init.sh --fix le fait"
   fi
 }
