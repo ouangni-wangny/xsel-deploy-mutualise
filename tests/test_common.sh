@@ -84,8 +84,8 @@ test_sauvegarde_affiche_l_erreur_mysqldump() {
   run bash -c "source '$COMMON'; backup_database '$T/.env' '$T/bk' 5"
   assert_contains "$OUT" "Sauvegarde DB échouée"; assert_contains "$OUT" "Access denied"
 }
-test_sauvegarde_ignoree_hors_mysql() {
-  mkstub mysqldump 'exit 0'; printf 'DB_CONNECTION=sqlite\n' > "$T/.env"
+test_sauvegarde_ignoree_pour_un_moteur_inconnu() {
+  mkstub mysqldump 'exit 0'; printf 'DB_CONNECTION=sqlsrv\n' > "$T/.env"
   run bash -c "source '$COMMON'; PHP_BIN=/nonexistent backup_database '$T/.env' '$T/bk' 5"
   assert_contains "$OUT" "sauvegarde ignorée"
 }
@@ -101,4 +101,35 @@ test_doctor_alerte_si_le_moteur_mysql_par_defaut_n_est_pas_innodb() {
   assert_contains "$OUT" "le projet impose InnoDB"; assert_not_contains "$OUT" "imposer InnoDB dans"
   run bash -c "cat '$COMMON' '$REPO/scripts/doctor.sh' | ENGINE=InnoDB STACK=laravel DEPLOY_PATH='$T/app' PHP_BIN=/nonexistent bash -s"
   assert_contains "$OUT" "moteur MySQL par défaut : InnoDB"; assert_not_contains "$OUT" "imposer InnoDB"
+}
+test_sauvegarde_sqlite_relative_a_l_app() {
+  mkdir -p "$T/app/database"
+  if command -v sqlite3 >/dev/null; then sqlite3 "$T/app/database/database.sqlite" "CREATE TABLE t(x); INSERT INTO t VALUES ('contenu');"
+  else printf 'SQLite format 3\000contenu' > "$T/app/database/database.sqlite"; fi
+  printf 'DB_CONNECTION=sqlite\n' > "$T/app/.env"
+  run bash -c "source '$COMMON'; PHP_BIN=/nonexistent backup_database '$T/app/.env' '$T/bk' 5"
+  assert_contains "$OUT" "Sauvegarde DB effectuée"
+  f="$(ls "$T"/bk/*.sqlite.gz)"; [ -n "$f" ] || fail "aucune sauvegarde .sqlite.gz"
+  assert_contains "$(gzip -dc "$f" | tr -d '\000')" "SQLite format 3"
+}
+test_sauvegarde_sqlite_absente_est_ignoree() {
+  printf 'DB_CONNECTION=sqlite\nDB_DATABASE=/nulle/part.sqlite\n' > "$T/.env"
+  run bash -c "source '$COMMON'; PHP_BIN=/nonexistent backup_database '$T/.env' '$T/bk' 5"
+  assert_eq "$RC" 0; assert_contains "$OUT" "base SQLite introuvable"
+}
+test_sauvegarde_postgresql_transmet_identifiants() {
+  printf 'DB_CONNECTION=pgsql\nDB_HOST=db\nDB_PORT=5433\nDB_DATABASE=site\nDB_USERNAME=u\nDB_PASSWORD=s3cret\n' > "$T/.env"
+  mkstub pg_dump '{ echo "args: $*"; echo "pwd=[$PGPASSWORD]"; } > "$STUB_OUT"; echo "-- pg dump"'
+  export STUB_OUT="$T/out"
+  run bash -c "source '$COMMON'; PHP_BIN=/nonexistent backup_database '$T/.env' '$T/bk' 5"
+  assert_contains "$OUT" "Sauvegarde DB effectuée"
+  assert_file_contains "$T/out" "-h db -p 5433 -U u site"; assert_file_contains "$T/out" "pwd=[s3cret]"
+  assert_eq "$(gzip -dc "$T"/bk/*.sql.gz)" "-- pg dump"
+}
+test_sauvegarde_postgresql_en_echec_ne_bloque_pas() {
+  printf 'DB_CONNECTION=pgsql\nDB_DATABASE=site\nDB_USERNAME=u\n' > "$T/.env"
+  mkstub pg_dump 'echo "pg_dump: error: connection refused" >&2; exit 1'
+  run bash -c "source '$COMMON'; PHP_BIN=/nonexistent backup_database '$T/.env' '$T/bk' 5"
+  assert_eq "$RC" 0; assert_contains "$OUT" "Sauvegarde DB échouée"; assert_contains "$OUT" "pg_dump : pg_dump: error"
+  [ -z "$(ls "$T"/bk 2>/dev/null)" ] || fail "fichier partiel conservé"
 }

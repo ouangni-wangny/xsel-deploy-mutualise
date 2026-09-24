@@ -56,3 +56,13 @@ test_set_secrets_exige_les_parametres_et_une_cle() {
 test_echoue_sans_app_detectee() {
   mkdir -p "$T/empty"; cd "$T/empty"; run bash "$SCRIPT"; assert_eq "$RC" 1; assert_contains "$OUT" "aucune app détectée"
 }
+test_staging_ajoute_la_branche_et_le_manifeste_de_staging() {
+  fixture; run bash "$SCRIPT" --user u --staging preprod
+  assert_eq "$RC" 0
+  assert_file_contains .github/workflows/cicd.yml "branches: [main, preprod]"
+  assert_file_contains .github/workflows/cicd.yml "manifest: \${{ github.ref_name == 'preprod' && '.xsel-deploy.staging.yml' || '.xsel-deploy.yml' }}"
+  assert_file_contains .xsel-deploy.staging.yml "deploy_branch: preprod"
+  assert_file_contains .xsel-deploy.staging.yml "deploy_path: /home/u/backend-staging"
+  run env REPO_DIR="$T/p" MANIFEST=.xsel-deploy.staging.yml EVENT_NAME=workflow_dispatch REF=refs/heads/preprod bash "$REPO/scripts/plan.sh"
+  assert_eq "$RC" 0; assert_contains "$OUT" "environment=staging"
+}

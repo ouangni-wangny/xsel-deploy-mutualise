@@ -68,7 +68,7 @@ if [ "$STACK" = "laravel" ]; then
     [ -f "${DEPLOY_PATH}/vendor/autoload.php" ] && echo "vendor/ : présent" || echo "vendor/ : absent (livré au déploiement)"
     [ -w "${DEPLOY_PATH}/storage" ] && echo "storage/ : inscriptible" || echo "storage/ : NON inscriptible"
     db_engine_check "${DEPLOY_PATH}/.env"
-    newest="$(ls -t "${DEPLOY_PATH}"/.backups/db/*.sql.gz 2>/dev/null | head -n 1)"
+    newest="$(ls -t "${DEPLOY_PATH}"/.backups/db/*.gz 2>/dev/null | head -n 1)"
     [ -n "$newest" ] && echo "dernière sauvegarde DB : ${newest##*/}" || echo "sauvegardes DB : aucune"
   fi
 fi

@@ -25,7 +25,8 @@ apps:
     # composer_on_server: false           # true : composer install sur le serveur (ancien mode)
     # manage_web_php: true                # false : ne jamais toucher au PHP du domaine (cPanel)
     # build_frontend_assets: true         # Laravel + Blade/Vite : compiler les assets (défaut : false, API JSON)
-    # protect_paths: [public/uploads]     # protégés de rsync --delete (.env, storage/ le sont déjà)
+    # protect_paths: [public/uploads]     # protégés de rsync --delete (.env, storage/, /.well-known,
+    #                                     # /cgi-bin et les apps imbriquées du manifeste le sont déjà)
 
   frontend:
     path: frontend
@@ -34,6 +35,7 @@ apps:
     build_env:                            # figé au build (NEXT_PUBLIC_*), jamais relu au runtime
       NEXT_PUBLIC_API_URL: https://api.example.com/api/v1
     # node_version: "22"                  # défaut : .nvmrc / engines.node, sinon 22
+    # provision: true                     # action: provision → déclare l'app Node (Setup Node.js App) si absente
 
 # policy:
 #   ignore: [laravel-htaccess]   # règles de conformité à ne pas appliquer (ADR-0012), à justifier en revue

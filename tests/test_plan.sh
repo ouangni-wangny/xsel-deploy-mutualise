@@ -156,3 +156,46 @@ test_provision_n_est_jamais_lance_par_un_push() {
   plan push REF=refs/heads/main BEFORE=0000000000000000000000000000000000000000
   assert_contains "$OUT" "has_provision=false"
 }
+test_protect_paths_automatique_pour_une_app_imbriquee() {
+  # Sous-domaine cPanel rangé dans le dossier du domaine principal (PECI, Univers Gravure) :
+  # sans protection, le rsync --delete du frontend effacerait le backend.
+  mkrepo
+  cat > .xsel-deploy.yml <<'Y'
+version: 1
+apps:
+  backend:
+    deploy_path: /home/u/site.com/backend
+  frontend:
+    deploy_path: /home/u/site.com/
+    protect_paths: [uploads, backend]
+  autre:
+    path: frontend
+    deploy_path: /home/u/site.com-old
+Y
+  git add -A; git commit -q -m m; plan workflow_dispatch REF=refs/heads/main
+  apps="$(echo "$OUT" | sed -n 's/^deploy_apps=//p')"
+  assert_eq "$(jq -r '.[] | select(.name=="frontend") | .protect_paths' <<<"$apps")" $'uploads\nbackend'   # sans doublon, ordre conservé
+  assert_eq "$(jq -r '.[] | select(.name=="backend") | .protect_paths' <<<"$apps")" ""
+  assert_eq "$(jq -r '.[] | select(.name=="autre") | .protect_paths' <<<"$apps")" ""                    # préfixe de nom ≠ dossier parent
+  printf 'version: 1\napps:\n  backend: {deploy_path: /home/u/s/api}\n  frontend: {path: frontend, deploy_path: /home/u/s}\n' > .xsel-deploy.yml
+  git add -A; git commit -q -m m2; plan workflow_dispatch REF=refs/heads/main
+  assert_eq "$(echo "$OUT" | sed -n 's/^deploy_apps=//p' | jq -r '.[] | select(.name=="frontend") | .protect_paths')" "api"
+  assert_contains "$OUT" "protect_paths frontend : api"
+}
+test_manifeste_de_staging_deploie_sa_branche_seulement() {
+  mkrepo
+  printf 'version: 1\ndeploy_branch: staging\nenvironment: staging\napps:\n  backend: {deploy_path: /home/u/api-staging}\n' > .xsel-deploy.staging.yml
+  git add -A; git commit -q -m s
+  plan push MANIFEST=.xsel-deploy.staging.yml REF=refs/heads/staging BEFORE="$B1"
+  assert_eq "$RC" 0; assert_contains "$OUT" "environment=staging"
+  assert_eq "$(echo "$OUT" | sed -n 's/^deploy_apps=//p' | jq -r '.[].deploy_path')" "/home/u/api-staging"
+  plan push MANIFEST=.xsel-deploy.staging.yml REF=refs/heads/main BEFORE="$B1"
+  assert_eq "$(echo "$OUT" | sed -n 's/^deploy_apps=//p')" "[]"
+}
+test_deploiement_manuel_refuse_hors_de_la_branche_de_deploiement() {
+  mkrepo
+  plan workflow_dispatch REF=refs/heads/feature/x
+  assert_eq "$RC" 1; assert_contains "$OUT" "déploiement manuel refusé depuis feature/x"
+  plan workflow_dispatch REF=refs/heads/feature/x ACTION=doctor
+  assert_eq "$RC" 0                                                         # diagnostic toujours permis
+}

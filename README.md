@@ -237,6 +237,12 @@ l'autre app. Sans `protect_paths`, le déploiement de l'app parente
 supprimerait ce sous-dossier via `rsync --delete` (incident réel, voir
 [ADR-0002](docs/adr/0002-releases-symlink-zero-downtime.md)) :
 
+Depuis `v1.7.0`, c'est **automatique** entre apps d'un même manifeste : une app
+dont le `deploy_path` est à l'intérieur de celui d'une autre est ajoutée d'office
+aux `protect_paths` de la parente (visible dans les logs du job `plan`).
+`protect_paths` reste utile pour ce qui n'est pas une app du manifeste
+(dossier d'un autre dépôt, fichiers déposés à la main) :
+
 ```yaml
 # workflow de l'app "parente" (ex. frontend, deploy_path: /home/user/example.com)
 with:
@@ -324,10 +330,12 @@ nano /home/<user>/<app>/.env
     un nouveau (sous-)domaine.
   - **Alternative** : cPanel → *Domains* → changer le document root vers
     `<deploy_path>/public` — dans ce cas, pas besoin du `.htaccess` racine.
-- **Next.js** : cPanel → *Setup Node.js App* → *Create Application*,
-  Application root = `<deploy_path>`, fichier de démarrage `server.js` —
-  détail dans
-  [`templates/passenger-nextjs-notes.md`](templates/passenger-nextjs-notes.md).
+- **Next.js** : `action: provision` (avec `provision: true` sur l'app dans le
+  manifeste) déclare l'app Node tout seul — `cloudlinux-selector` sur CloudLinux
+  (version de Node = `.nvmrc` / `node_version`), sinon `uapi PassengerApps` ;
+  idempotent. À défaut : cPanel → *Setup Node.js App* → *Create Application*,
+  Application root = `<deploy_path>`, fichier de démarrage `server.js` (détail dans
+  [`templates/passenger-nextjs-notes.md`](templates/passenger-nextjs-notes.md)).
   cPanel génère lui-même un `.htaccess` à cette étape — ne jamais le
   committer ni le modifier à la main, le workflow le protège déjà.
 
@@ -351,19 +359,32 @@ vers `.github/workflows/monitor.yml`, adapter les URLs.
 
 ### 9. Premier déploiement
 
-Push sur `main` → déploiement automatique. Pas de rollback automatisé
-(voir ADR-0002) : en cas de problème, revert le commit fautif et repush,
-ou corrige directement sur le serveur.
+Push sur `main` → déploiement automatique. En cas de problème : revert du
+commit fautif et push (la base a été sauvegardée juste avant les migrations,
+voir [Sauvegardes](#sauvegardes)).
+
+### 10. Environnement de staging (optionnel)
+
+```bash
+bash <(curl -fsSL …/init.sh) --staging staging
+```
+écrit `.xsel-deploy.staging.yml` (`deploy_branch: staging`, `environment: staging`,
+dossiers et URLs à adapter) et un `cicd.yml` qui choisit le manifeste selon la
+branche : un push sur `staging` déploie la préproduction, un push sur `main` la
+production, chacun avec ses propres dossiers, URLs, base (`provision`) et
+approbations (*Settings → Environments*). Un déploiement **manuel** n'est accepté
+que depuis la branche de déploiement du manifeste : « Run workflow » sur une
+branche de travail ne peut plus partir en production.
 
 ---
 
 ## Sauvegardes
 
-- **Base de données** (`laravel` uniquement, MySQL/MariaDB) :
-  `mysqldump` avant chaque `migrate --force`, dans
-  `<deploy_path>/.backups/db/` (5 dumps compressés conservés, purge
-  automatique). Ne bloque jamais le déploiement si `mysqldump` échoue ou
-  est absent — c'est un filet, pas un pré-requis.
+- **Base de données** (`laravel`) : avant chaque `migrate --force`, dans
+  `<deploy_path>/.backups/db/` (5 sauvegardes compressées conservées, purge
+  automatique) — MySQL/MariaDB (`mysqldump`), PostgreSQL (`pg_dump`), SQLite
+  (`sqlite3 .backup`, sinon copie du fichier). Ne bloque jamais le déploiement si
+  l'outil échoue ou est absent — c'est un filet, pas un pré-requis.
 - **`.env` de prod** : n'existe que sur le serveur par défaut, aucune
   copie automatique. Recommandé, une fois rempli (étape 5) :
   ```bash
@@ -384,35 +405,17 @@ ce repo ne casse tout le monde en même temps.
 
 ## Ce qui manque / limites connues
 
-- **Pas de rollback automatisé.** Décision explicite (ADR-0002) en
-  échange de la simplicité — pas de `releases/`/symlink. Un futur projet
-  qui en a vraiment besoin peut réintroduire ce schéma (voir l'historique
-  git de l'ADR et des scripts).
-- **Les scripts serveur sont toujours tirés de `main`**, même si le
-  projet appelant épingle ce workflow sur un tag (`@v1.0.1`) — limitation
-  GitHub Actions documentée en détail dans
-  [ADR-0004](docs/adr/0004-central-reusable-workflow.md).
-- **Sauvegarde DB : MySQL/MariaDB uniquement.** PostgreSQL, SQLite ou
-  autre → `backup_database()` s'auto-désactive proprement (pas d'échec),
-  mais aucune sauvegarde n'a lieu.
-- **Provisioning cPanel toujours manuel** : création de la base de
-  données, réglage du document root, création de l'app Node — aucune
-  automatisation via l'API cPanel (UAPI) pour l'instant, malgré son
-  accessibilité prouvée en SSH (`uapi Mysql ...` fonctionne).
-- **Hébergeurs sans SSH non supportés** (FTP uniquement, déploiement Git
-  natif cPanel) — voir les limites de
-  [ADR-0001](docs/adr/0001-ssh-rsync-transport.md).
-- **`protect_paths` est manuel** : aucune détection automatique des
-  `deploy_path` imbriqués entre apps d'un même projet — à identifier et
-  déclarer soi-même à l'onboarding.
-- **Connexions SSH limitées par l'hébergeur** : le kit n'ouvre que 2
-  connexions (ADR-0006), mais un pare-feu plus strict que ça reste
-  bloquant — symptôme : `Connection timed out` (pas `Permission denied`)
-  dès l'étape « Configurer la clé SSH ». À faire lever côté hébergeur.
-- **Pas de runbook de rotation de secrets** (clé SSH, mot de passe DB) —
-  à faire à la main si compromission ou changement d'équipe.
-- **Pas d'environnement de staging** — tout push sur `main` part en
-  production, seule la CI (tests) fait office de filet avant déploiement.
+- **Hébergeurs sans SSH non supportés** (FTP uniquement) — choix assumé :
+  sans SSH, ni migrations, ni caches, ni sauvegarde de base ne sont possibles
+  proprement ; voir [ADR-0001](docs/adr/0001-ssh-rsync-transport.md). Demander
+  l'activation de SSH à l'hébergeur.
+- **Pare-feu SSH de l'hébergeur** : le kit n'ouvre que 2 connexions (ADR-0006),
+  mais un hébergeur qui filtre SSH par IP bloque les runners GitHub (IP
+  variables) — symptôme : `Connection timed out` (pas `Permission denied`) dès
+  l'étape « Configurer la clé SSH ». À faire lever côté hébergeur.
+- **Rotation des secrets manuelle** mais documentée pas à pas :
+  [runbook](docs/runbooks/rotation-secrets.md) (clé SSH, mot de passe MySQL,
+  `APP_KEY`, jetons de notification).
 
 ## Statut
 
@@ -420,7 +423,13 @@ Conçu par ADR, validé en conditions réelles sur PECI (plusieurs incidents
 rencontrés et corrigés en direct — voir les ADR et l'historique des
 commits). Versions taguées :
 
-- **`v1.6.0`** (courant) — **conformité du projet bloquante** et corrigeable :
+- **`v1.7.0`** (courant) — `provision` déclare l'app Node (cloudlinux-selector /
+  uapi PassengerApps) ; `protect_paths` automatique entre apps imbriquées ;
+  sauvegarde PostgreSQL et SQLite ; environnement de **staging** (`init.sh --staging`,
+  manifeste par branche) ; déploiement manuel refusé hors de la branche de
+  déploiement ; runbook de rotation des secrets. Voir
+  [ADR-0013](docs/adr/0013-limites-levees.md).
+- **`v1.6.0`** — **conformité du projet bloquante** et corrigeable :
   `scripts/conform.sh` (source unique des règles), `init.sh --check / --fix / --json`
   (dev ou agent IA), résumé du run avec corrections, `policy.ignore` ; `/.well-known`
   et `/cgi-bin` protégés au déploiement ; base de test CI prioritaire sur

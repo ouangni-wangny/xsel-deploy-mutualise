@@ -2,8 +2,8 @@ name: Provisionner une application
 description: >
   Prépare UNE FOIS une app fraîche sur le serveur : dossiers, base MySQL + utilisateur
   (API cPanel uapi) et `.env` de production complet (Laravel). Idempotent : ne touche
-  à rien si `.env` existe déjà. Pour Next.js/Passenger : crée seulement le dossier
-  (l'app Node se déclare dans cPanel → Setup Node.js App). Prérequis du job appelant :
+  à rien si `.env` existe déjà. Pour Next.js/Passenger : crée le dossier et déclare
+  l'app Node (cloudlinux-selector, sinon uapi PassengerApps), idempotent. Prérequis du job appelant :
   projet dans `app/`, kit dans `deploy-kit/` (checkout de job.workflow_sha).
 
 inputs:
@@ -20,6 +20,10 @@ inputs:
     required: true
   health_check_url:
     description: URL publique de l'app (devient APP_URL)
+    required: false
+    default: ""
+  node_version:
+    description: "nextjs-passenger : version de Node (vide = détectée : .nvmrc / engines.node, sinon 22)"
     required: false
     default: ""
   database:
@@ -47,10 +51,11 @@ runs:
       shell: bash
       env:
         STACK_INPUT: ${{ inputs.stack }}
+        NODE_INPUT: ${{ inputs.node_version }}
         APP_PATH: ${{ inputs.app_path }}
       run: |
         OUT="$(bash deploy-kit/scripts/detect-app.sh "app/${APP_PATH}")" || { echo "$OUT"; exit 1; }
-        echo "$OUT" | grep -E '^stack=' >> "$GITHUB_OUTPUT"
+        echo "$OUT" | grep -E '^(stack|node_version)=' >> "$GITHUB_OUTPUT"
 
     - name: Configurer SSH (connexion partagée)
       uses: ./deploy-kit/.github/actions/ssh-setup
@@ -64,6 +69,7 @@ runs:
       shell: bash
       env:
         STACK: ${{ steps.detect.outputs.stack }}
+        NODE_MAJOR: ${{ steps.detect.outputs.node_version }}
         APP_PATH: ${{ inputs.app_path }}
         DEPLOY_PATH: ${{ inputs.deploy_path }}
         HEALTH_URL: ${{ inputs.health_check_url }}
@@ -82,8 +88,13 @@ runs:
           rssh "DEPLOY_PATH='${DEPLOY_PATH}' APP_URL='${APP_URL}' DB_NAME='${DB_NAME}' ENV_EXAMPLE_B64='${ENV_B64}' bash -s" \
             < deploy-kit/scripts/provision-laravel.sh | tee -a "$GITHUB_STEP_SUMMARY"
         else
-          rssh "mkdir -p '${DEPLOY_PATH}' && echo '✅ ${DEPLOY_PATH} prêt — déclarez l app Node dans cPanel → Setup Node.js App (racine : ${DEPLOY_PATH}, fichier de démarrage : server.js)'" \
-            | tee -a "$GITHUB_STEP_SUMMARY"
+          # Domaine servi = hôte de l'URL publique ; chemin de l'app = son chemin (défaut /)
+          DOMAIN=""; APP_URI="/"
+          if [ -n "$HEALTH_URL" ]; then
+            rest="${HEALTH_URL#*://}"; DOMAIN="${rest%%/*}"
+          fi
+          rssh "DEPLOY_PATH='${DEPLOY_PATH}' DOMAIN='${DOMAIN}' NODE_MAJOR='${NODE_MAJOR}' APP_URI='${APP_URI}' bash -s" \
+            < deploy-kit/scripts/provision-nextjs.sh | tee -a "$GITHUB_STEP_SUMMARY"
         fi
 
     - name: Fermer la connexion SSH partagée

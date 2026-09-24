@@ -267,6 +267,7 @@ jobs:
           app_path: ${{ matrix.app.path }}
           deploy_path: ${{ matrix.app.deploy_path }}
           health_check_url: ${{ matrix.app.health_check_url }}
+          node_version: ${{ matrix.app.node_version }}
           database: ${{ matrix.app.provision_database }}
           ssh_host: ${{ secrets.DEPLOY_SSH_HOST }}
           ssh_port: ${{ secrets.DEPLOY_SSH_PORT }}

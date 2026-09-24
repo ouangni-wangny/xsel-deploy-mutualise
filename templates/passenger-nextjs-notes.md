@@ -1,5 +1,9 @@
 # Onboarding cPanel — app Next.js (une seule fois par projet)
 
+Depuis `v1.7.0`, `action: provision` (avec `provision: true` sur l'app) fait
+l'étape 1 tout seul (cloudlinux-selector ou uapi PassengerApps). Ce qui suit reste
+la procédure manuelle, et l'étape 2 (variables d'environnement runtime) reste à faire.
+
 À faire manuellement dans cPanel avant le premier déploiement automatisé
 d'une app `nextjs-passenger` (voir ADR-0003 et ADR-0002 — déploiement
 direct, sans `current`/releases) :

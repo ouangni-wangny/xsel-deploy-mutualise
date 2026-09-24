@@ -27,12 +27,14 @@
 #   --kit-ref REF      référence du kit dans cicd.yml (défaut v1)
 #   --force            écrase cicd.yml / .xsel-deploy.yml existants
 #   --dry-run          n'écrit et ne pose RIEN : affiche seulement ce qui serait fait
+#   --staging BRANCHE  environnement de staging : un push sur BRANCHE déploie avec
+#                      .xsel-deploy.staging.yml (squelette écrit, dossiers et URLs à adapter)
 #   --check | --fix | --json   voir « Conformité » ci-dessus
 # =============================================================================
 set -uo pipefail
 
 DIR="."; REPO=""; SSH_USER=""; SSH_HOST=""; SSH_PORT=""; KEY_FILE=""
-GEN_KEY=0; SET_SECRETS=0; KIT_REF="v1"; FORCE=0; DRY=0; CHECK=0; FIX=0; JSON=0
+GEN_KEY=0; SET_SECRETS=0; KIT_REF="v1"; FORCE=0; DRY=0; CHECK=0; FIX=0; JSON=0; STAGING=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dir) DIR="$2"; shift 2 ;;            --repo) REPO="$2"; shift 2 ;;
@@ -42,7 +44,8 @@ while [ $# -gt 0 ]; do
     --kit-ref) KIT_REF="$2"; shift 2 ;;    --force) FORCE=1; shift ;;
     --dry-run) DRY=1; shift ;;             --check) CHECK=1; shift ;;
     --fix) FIX=1; shift ;;                 --json) JSON=1; shift ;;
-    -h|--help) sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --staging) STAGING="$2"; shift 2 ;;
+    -h|--help) sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "option inconnue : $1 (voir --help)" >&2; exit 2 ;;
   esac
 done
@@ -93,29 +96,48 @@ write_file() { # write_file <chemin> ; contenu sur stdin
   if [ "$DRY" -eq 1 ]; then cat >/dev/null; act "écrirait $1"; else mkdir -p "$(dirname "$1")"; cat > "$1"; act "$1 écrit"; fi
 }
 
-step "Manifeste .xsel-deploy.yml"
-{
+manifest() { # manifest [suffixe-de-dossier] [branche]
+  local sfx="${1:-}" branch="${2:-}"
   echo "version: 1"; echo
+  if [ -n "$branch" ]; then
+    echo "# Staging : un push sur « ${branch} » déploie ces apps (manifeste choisi par cicd.yml)."
+    echo "deploy_branch: ${branch}"; echo "environment: staging"; echo
+  fi
   echo "apps:"
   for a in "${APPS[@]}"; do
     name="$a"; [ "$a" = "." ] && name="app"
     echo "  ${name}:"
     [ "$a" = "." ] && echo "    path: ." || echo "    path: ${a}"
-    echo "    deploy_path: /home/${U}/${name}                 # À ADAPTER : dossier sur le serveur"
-    echo "    health_check_url: https://EXEMPLE.COM              # À ADAPTER : URL publique (Laravel : …/up)"
+    echo "    deploy_path: /home/${U}/${name}${sfx}                 # À ADAPTER : dossier sur le serveur"
+    echo "    health_check_url: https://${sfx:+staging.}EXEMPLE.COM              # À ADAPTER : URL publique (Laravel : …/up)"
     case " ${LARAVEL[*]-} " in *" $a "*) echo "    # database: mysql                                   # CI : conteneur MySQL pour les tests"
-                                       echo "    # provision: { database: nom }                      # création de la base + .env (action: provision)" ;; esac
+                                       echo "    # provision: { database: nom${sfx:+_staging} }                      # création de la base + .env (action: provision)" ;; esac
     echo
   done
-} | write_file .xsel-deploy.yml
+}
+
+step "Manifeste .xsel-deploy.yml"
+manifest | write_file .xsel-deploy.yml
+if [ -n "$STAGING" ]; then
+  step "Manifeste de staging .xsel-deploy.staging.yml (branche ${STAGING})"
+  manifest -staging "$STAGING" | write_file .xsel-deploy.staging.yml
+fi
 
 step "Workflow .github/workflows/cicd.yml"
+BRANCHES="main"; WITH=""
+if [ -n "$STAGING" ]; then
+  BRANCHES="main, ${STAGING}"
+  WITH="    # Branche « ${STAGING} » → manifeste de staging ; toute autre → production.
+    with:
+      manifest: \${{ github.ref_name == '${STAGING}' && '.xsel-deploy.staging.yml' || '.xsel-deploy.yml' }}
+"
+fi
 cat <<Y | write_file .github/workflows/cicd.yml
 name: CI/CD
 
 on:
   push:
-    branches: [main]
+    branches: [${BRANCHES}]
   pull_request:
   schedule:
     - cron: '*/15 * * * *'
@@ -137,7 +159,7 @@ permissions:
 jobs:
   pipeline:
     uses: ouangni-wangny/xsel-deploy-mutualise/.github/workflows/pipeline.yml@${KIT_REF}
-    # Secrets passés un par un : « secrets: inherit » ne transmet rien à un
+${WITH}    # Secrets passés un par un : « secrets: inherit » ne transmet rien à un
     # workflow réutilisable d'un autre propriétaire.
     secrets:
       DEPLOY_SSH_HOST: \${{ secrets.DEPLOY_SSH_HOST }}

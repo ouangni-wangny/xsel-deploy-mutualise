@@ -89,6 +89,16 @@ APPS="$(jq -c 'def d(x): if . == null then x else . end;
     provision_database: (if ($v.provision | type) == "object" then (($v.provision.database | d("")) | tostring) else "" end)
   })' <<<"$CFG")"
 
+# protect_paths automatique : une app dont le deploy_path est À L'INTÉRIEUR de
+# celui d'une autre (sous-domaine cPanel rangé dans le dossier du domaine
+# principal, cas PECI / Univers Gravure) serait effacée par le rsync --delete de
+# l'app parente. On l'ajoute d'office aux protect_paths de la parente.
+APPS="$(jq -c '. as $all | map(. as $a | ($a.deploy_path | sub("/+$";"")) as $root
+  | ($all | map(select(.name != $a.name and $root != "" and (.deploy_path | startswith($root + "/")))
+                | .deploy_path | ltrimstr($root + "/") | sub("/+$";""))) as $nested
+  | .protect_paths = (((.protect_paths | split("\n") | map(select(length > 0))) + $nested) | reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end) | join("\n")))' <<<"$APPS")"
+jq -r '.[] | select(.protect_paths != "") | "protect_paths \(.name) : \(.protect_paths | split("\n") | join(", "))"' <<<"$APPS" >&2
+
 # build_frontend_assets : false par défaut. Le squelette Laravel embarque toujours
 # un package.json avec `vite build`, même pour une API JSON : le détecter comme
 # « assets à compiler » serait un faux positif fréquent → activation explicite.
@@ -137,6 +147,10 @@ case "$EVENT" in
     elif [ "$ACTION" = "provision" ]; then
       PROVISION_APPS="$(jq -c '[ .[] | select(.provision and .deploy_path != "") ]' <<<"$SEL")"
     else
+      # Déploiement manuel : seulement depuis la branche de déploiement du manifeste.
+      # Sinon « Run workflow » sur une branche de travail l'enverrait en production
+      # (ou, avec un manifeste de staging, une branche sur le mauvais environnement).
+      [ "$ON_DEPLOY_BRANCH" = true ] || die "déploiement manuel refusé depuis ${REF#refs/heads/} : ${MANIFEST} ne déploie que la branche « ${DEPLOY_BRANCH} » (doctor et provision restent possibles)"
       CI_APPS="$(jq -c '[ .[] | select(.ci != "none") ]' <<<"$SEL")"
       DEPLOY_APPS="$(jq -c '[ .[] | select(.deploy and .deploy_path != "") ]' <<<"$SEL")"
     fi

@@ -125,35 +125,54 @@ read_db_env() {
 backup_database() {
   local env_file="$1" backup_dir="$2" keep="${3:-5}"
 
-  command -v mysqldump >/dev/null 2>&1 || { log "mysqldump indisponible, sauvegarde DB ignorée"; return 0; }
   [ -f "$env_file" ] || { log ".env introuvable, sauvegarde DB ignorée"; return 0; }
 
   local db_conn db_host db_port db_name db_user db_pass
   read_db_env "$env_file"
+
+  # Commande de dump (sur stdout) selon le moteur ; outil absent → pas de sauvegarde.
+  local tool ext cmd=()
   case "$db_conn" in
-    mysql|mariadb) ;;
-    *) log "DB_CONNECTION=${db_conn:-?}, sauvegarde ignorée (mysql/mariadb uniquement)"; return 0 ;;
+    mysql|mariadb)
+      tool=mysqldump; ext=sql
+      command -v mysqldump >/dev/null 2>&1 || { log "mysqldump indisponible, sauvegarde DB ignorée"; return 0; }
+      # MySQL 8 exige le privilège PROCESS pour les tablespaces : rarement accordé
+      # en mutualisé, et inutile pour une sauvegarde applicative.
+      cmd=(mysqldump --single-transaction --quick)
+      mysqldump --help 2>/dev/null | grep -q -- '--no-tablespaces' && cmd+=(--no-tablespaces)
+      cmd+=(-h "${db_host:-127.0.0.1}" -P "${db_port:-3306}" -u "$db_user" "$db_name") ;;
+    pgsql)
+      tool=pg_dump; ext=sql
+      command -v pg_dump >/dev/null 2>&1 || { log "pg_dump indisponible, sauvegarde DB ignorée"; return 0; }
+      cmd=(pg_dump --no-owner --no-privileges -h "${db_host:-127.0.0.1}" -p "${db_port:-5432}" -U "$db_user" "$db_name") ;;
+    sqlite)
+      tool=sqlite; ext=sqlite
+      # DB_DATABASE absent = database/database.sqlite (défaut Laravel) ; relatif = depuis l'app.
+      local db_file="${db_name:-database/database.sqlite}"
+      case "$db_file" in /*) ;; *) db_file="$(dirname "$env_file")/${db_file}" ;; esac
+      [ -f "$db_file" ] || { log "base SQLite introuvable (${db_file}), sauvegarde ignorée"; return 0; }
+      # sqlite3 .backup : copie cohérente même pendant une écriture ; sinon copie du fichier.
+      if command -v sqlite3 >/dev/null 2>&1; then
+        local snap; snap="$(mktemp)"
+        cmd=(sh -c 'sqlite3 "$1" ".backup $2" && cat "$2"; rc=$?; rm -f "$2"; exit $rc' _ "$db_file" "$snap")
+      else
+        cmd=(cat "$db_file")
+      fi ;;
+    *) log "DB_CONNECTION=${db_conn:-?}, sauvegarde ignorée (mysql, mariadb, pgsql ou sqlite)"; return 0 ;;
   esac
 
   mkdir -p "$backup_dir"
-  local file
-  file="${backup_dir}/$(date -u +%Y%m%d%H%M%S).sql.gz"
-
-  log "Sauvegarde DB -> ${file}"
-  # MySQL 8 exige le privilège PROCESS pour les tablespaces : rarement accordé
-  # en mutualisé, et inutile pour une sauvegarde applicative.
-  local extra=() err
-  mysqldump --help 2>/dev/null | grep -q -- '--no-tablespaces' && extra+=(--no-tablespaces)
+  local file err
+  file="${backup_dir}/$(date -u +%Y%m%d%H%M%S).${ext}.gz"
+  log "Sauvegarde DB (${db_conn}) -> ${file}"
   err="$(mktemp)"
-  if MYSQL_PWD="$db_pass" mysqldump --single-transaction --quick ${extra[@]+"${extra[@]}"} \
-      -h "${db_host:-127.0.0.1}" -P "${db_port:-3306}" -u "$db_user" "$db_name" 2>"$err" \
-      | gzip > "$file"; then
-    find "${backup_dir}" -maxdepth 1 -name '*.sql.gz' -printf '%T@ %p\n' 2>/dev/null \
+  if MYSQL_PWD="$db_pass" PGPASSWORD="$db_pass" "${cmd[@]}" 2>"$err" | gzip > "$file" && [ "${PIPESTATUS[0]}" -eq 0 ]; then
+    find "${backup_dir}" -maxdepth 1 \( -name '*.sql.gz' -o -name '*.sqlite.gz' \) -printf '%T@ %p\n' 2>/dev/null \
       | sort -rn | tail -n "+$((keep + 1))" | cut -d' ' -f2- | xargs -r rm -f || true
     ok "Sauvegarde DB effectuée (${keep} conservées)"
   else
     log "⚠️  Sauvegarde DB échouée, déploiement poursuivi quand même"
-    [ -s "$err" ] && head -n 3 "$err" | cut -c1-300 | sed 's/^/    mysqldump : /'
+    [ -s "$err" ] && head -n 3 "$err" | cut -c1-300 | sed "s/^/    ${tool} : /"
     rm -f "$file"
   fi
   rm -f "$err"
